@@ -12,6 +12,14 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
+# Windows GBK 编码兼容：自动修复 Rich 的 emoji 输出问题
+if sys.platform == "win32" and sys.stdout.encoding and sys.stdout.encoding.lower() in ("gbk", "gb2312", "gb18030"):
+    import io
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+if sys.platform == "win32" and sys.stderr.encoding and sys.stderr.encoding.lower() in ("gbk", "gb2312", "gb18030"):
+    import io
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+
 # 添加项目根目录到路径
 project_root = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, project_root)
