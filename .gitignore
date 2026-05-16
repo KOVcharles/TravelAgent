@@ -8,6 +8,39 @@ env/
 venv/
 ENV/
 build/
+dist/
+*.egg-info/
+develop-eggs/
+downloads/
+sdist/
+wheels/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Config (keep template but ignore local)
+config.py
+
+# Data
+data/memory/
+data/models/
+data/rag_knowledge/
+
+# Test outputs
+tests/results/
+
+# VS Code Copilot personal settings
+.claude/settings.local.json
+.claude/claudian-settings.json
+
+# Logs
+*.log
+debug-logs/
 develop-eggs/
 dist/
 downloads/
