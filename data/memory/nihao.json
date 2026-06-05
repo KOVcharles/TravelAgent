@@ -1,0 +1,73 @@
+{
+  "user_id": "nihao",
+  "preferences": {},
+  "chat_history": [
+    {
+      "role": "user",
+      "content": "nihao",
+      "timestamp": "2026-04-26T08:09:26.340887+00:00",
+      "session_id": "0c7d9872"
+    },
+    {
+      "role": "assistant",
+      "content": "{\"status\": \"no_agents\", \"message\": \"没有需要调度的智能体\"}",
+      "timestamp": "2026-04-26T08:09:26.344657+00:00",
+      "session_id": "0c7d9872"
+    },
+    {
+      "role": "user",
+      "content": "你是什么模型？",
+      "timestamp": "2026-04-26T08:10:29.514864+00:00",
+      "session_id": "0c7d9872"
+    },
+    {
+      "role": "assistant",
+      "content": "{\"status\": \"completed\", \"intention\": {\"intents\": [{\"type\": \"information_query\", \"confidence\": 0.9, \"description\": \"用户询问助手的模型信息\", \"reason\": \"用户明确询问'你是什么模型'，属于对助手自身信息的查询\"}], \"key_entities\": {\"origin\": null, \"destination\": null, \"date\": null, \"duration\": null, \"other\": \"模型信息\"}}, \"agents_executed\": 1, \"results\": [{\"agent_name\": \"information_query\", \"priority\": 1, \"status\": \"success\", \"data\": {\"query_type\": \"网络搜索\", \"query_success\": true, \"results\": {\"summary\": \"我是DeepSeek Chat，由深度求索公司研发的AI助手。我的最新版本是DeepSeek-V3，知识截止于2024年7月，支持128K上下文长度和文件处理功能。如需API调用，可通过标准化接口访问多厂商模型（如OpenAI格式兼容的百度、阿里等500+模型）。\", \"sources\": [{\"title\": \"2025版国内外主流大模型API接口调用完整指南（附 Python/Java 对照代...\", \"snippet\": \"它最核心 的 价值在于 “标准化（Standardization）” —— 它将全球 500+ 模型 （包括 Google、Anthropic、百度、阿里等）全部清洗并封装成了标准 的 OpenAI 接口格式。 这意味着： 你 只需要写一套代码，就能调用世界上所有 的模型 。\", \"url\": \"https://zhuanlan.zhihu.com/p/1983367855245375096\"}, {\"title\": \"国产大模型接口示例：请求地址、API key获取地址、model列表、接口说...\", \"snippet\": \"Jan 20, 2026 · 本文介绍了多个国产大 模型 的HTTP调用方式，包括DeepSeek、智谱清言、月之暗面Kimi Chat、硅基流动SiliconFlow、百川大 模型 、通义千问、百度千帆、MiniMax和讯飞星火。 每个大 模型 都提供了相应的HTTP请求地址、API Key获取地址以及 模型 类型示例。\", \"url\": \"https://blog.csdn.net/qq_27471405/article/details/148152750\"}, {\"title\": \"灵码个人专业版支持通过API密钥接入阿里云百炼供应商的自定义模型，提...\", \"snippet\": \"Mar 17, 2026 · 点击 添加，选择服务商按需选择所需的 模型 ，并填写您的 API 密钥。 点击 获取 API 密钥 可跳转至对应服务商的密钥管理页面。 验证连接 点击 添加，系统将自动验证连接状态。 使用 模型 配置完成后，您可以在对话框中选择配置的 模型 开始使用。 管理自定义模型\", \"url\": \"https://help.aliyun.com/zh/lingma/user-guide/custom-model\"}, {\"title\": \"AIHubMix\", \"snippet\": \"Access every major LLM through a single, unified interface. Connect to ChatGPT, Claude, Gemini, DeepSeek, Doubao, Qwen and more with unlimited concurrency. Build smarter, faster.\", \"url\": \"https://aihubmix.com/\"}, {\"title\": \"查看与管理我的模型 - 百度AI开放平台\", \"snippet\": \"Apr 14, 2025 · 调试难度大，但是将前端 Python 编写的神经网络预定义为 Program 描述，转到 C++ 端重新解析执行，脱离了 Python 依赖，往往执行性能更佳，并且预先拥有完整网络结构也更利于全局优化。 支持导出的开源 模型 范围如下：\", \"url\": \"https://ai.baidu.com/ai-doc/WENXINWORKSHOP/dliu6v6nw\"}]}}}]}",
+      "timestamp": "2026-04-26T08:10:44.541799+00:00",
+      "session_id": "0c7d9872"
+    },
+    {
+      "role": "user",
+      "content": "重庆的天气怎么样？",
+      "timestamp": "2026-04-26T08:11:33.938018+00:00",
+      "session_id": "0c7d9872"
+    },
+    {
+      "role": "assistant",
+      "content": "{\"status\": \"completed\", \"intention\": {\"intents\": [{\"type\": \"information_query\", \"confidence\": 0.98, \"description\": \"用户询问重庆的天气情况\", \"reason\": \"用户明确询问'重庆的天气怎么样？'，属于对天气信息的查询\"}], \"key_entities\": {\"origin\": null, \"destination\": \"重庆\", \"date\": null, \"duration\": null, \"other\": \"天气信息\"}}, \"agents_executed\": 1, \"results\": [{\"agent_name\": \"information_query\", \"priority\": 1, \"status\": \"success\", \"data\": {\"query_type\": \"天气查询\", \"query_success\": true, \"results\": {\"summary\": \"重庆当前天气：Light rain shower，气温 23°C，湿度 76%。 未来几日：2026-04-26: Partly Cloudy ，21~25°C；2026-04-27: Light rain shower，17~22°C；2026-04-28: Light drizzle，15~16°C\", \"sources\": [{\"url\": \"https://wttr.in\", \"title\": \"wttr.in\"}]}}}]}",
+      "timestamp": "2026-04-26T08:11:35.255350+00:00",
+      "session_id": "0c7d9872"
+    },
+    {
+      "role": "user",
+      "content": "有什么好玩的地方吗？",
+      "timestamp": "2026-04-26T08:12:09.203757+00:00",
+      "session_id": "0c7d9872"
+    },
+    {
+      "role": "assistant",
+      "content": "{\"status\": \"completed\", \"intention\": {\"intents\": [{\"type\": \"information_query\", \"confidence\": 0.9, \"description\": \"用户询问旅游或娱乐活动的建议\", \"reason\": \"用户明确询问'有什么好玩的地方吗？'，属于对旅游或娱乐信息的查询\"}], \"key_entities\": {\"origin\": null, \"destination\": null, \"date\": null, \"duration\": null, \"other\": \"旅游或娱乐活动建议\"}}, \"agents_executed\": 1, \"results\": [{\"agent_name\": \"information_query\", \"priority\": 1, \"status\": \"success\", \"data\": {\"query_type\": \"网络搜索\", \"query_success\": true, \"results\": {\"summary\": \"当前是2026年4月26日周末，适合短途旅行或休闲活动。推荐东京出发的富士山一日游（含樱花季或枫叶季景观），或考虑巴拿马城海滩的度假屋（适合多人入住）。若需具体天气或活动详情，请提供更明确的地点或偏好。\", \"sources\": [{\"title\": \"时区列表 - 维基百科，自由的百科全书\", \"snippet\": \"5 days ago - 现在的日期与时间是协调世界时2026年4月24日15时36分。※按此更新\", \"url\": \"https://zh.wikipedia.org/zh-hans/时区列表\"}, {\"title\": \"2026年节假日sql oracle mysql-CSDN博客\", \"snippet\": \"November 5, 2025 - 文章浏览阅读939次，点赞22次，收藏7次。WHEN DAYOFWEEK(date_series.date_val) IN (1, 7) THEN '2' -- 周日=1, 周六=7。('星期六', '星期日') THEN。DAY_TYPE ：1工作日，2周末，3节假日。_2026年节假日sql\", \"url\": \"https://blog.csdn.net/qq_38190509/article/details/154426188\"}, {\"title\": \"booking.com/searchresults.zh-cn.html\", \"snippet\": \"Beautiful House Sleeps 12 - Hot Tub - Walk to Beach 巴拿马城海滩.\", \"url\": \"https://www.booking.com/searchresults.zh-cn.html\"}, {\"title\": \"魅影炼金 ~西尔维娅 的 心跳都市计划~anime... - kankanfan.com\", \"snippet\": \"然后，在不明不白 的 情况下，她就被斯蒂芬推倒了。 「为什么？ 明明很讨厌啊……」初体验结束之后都还没有 时 间 消沉，希尔维娅就感觉身体里涌出 一 股力量。 2026 - 04 - 16 14:23:55，最后更新于 4天 前 .\", \"url\": \"https://kankanfan.com/video/424.html\"}, {\"title\": \"富士山网红景点打卡 一 日 游 ｜东京出发 - Klook客路\", \"snippet\": \"如遇旺季，邮件推送 时 间 可能会推迟。 如遇到特殊情况导致收到多封邮件 的 ，请以最新 的 邮件为准。 03/28- 04 / 12 去河口湖樱花祭；河口湖枫叶回廊（秋季限定：11 月 1 日 ~11 月 30 日 ；官方通知）；其余 日 期 去河口湖大石公园.\", \"url\": \"https://www.klook.com/zh-CN/activity/93901-mtfuji-one-day-tour-tokyo/\"}]}}}]}",
+      "timestamp": "2026-04-26T08:12:20.688973+00:00",
+      "session_id": "0c7d9872"
+    },
+    {
+      "role": "user",
+      "content": "你会存储历史对话吗？",
+      "timestamp": "2026-04-26T08:12:50.908242+00:00",
+      "session_id": "0c7d9872"
+    },
+    {
+      "role": "assistant",
+      "content": "{\"status\": \"completed\", \"intention\": {\"intents\": [{\"type\": \"information_query\", \"confidence\": 0.95, \"description\": \"用户询问助手是否具备存储历史对话的功能\", \"reason\": \"用户明确询问'你会存储历史对话吗？'，属于对助手功能的查询\"}], \"key_entities\": {\"origin\": null, \"destination\": null, \"date\": null, \"duration\": null, \"other\": \"历史对话存储功能\"}}, \"agents_executed\": 1, \"results\": [{\"agent_name\": \"information_query\", \"priority\": 1, \"status\": \"success\", \"data\": {\"query_type\": \"网络搜索\", \"query_success\": true, \"results\": {\"summary\": \"部分AI助手具备存储历史对话的功能，例如蝉妈妈AI支持登录后查看和管理历史记录。但具体功能可能因不同产品而异，建议查阅相关产品的说明以确认。\", \"sources\": [{\"title\": \"需要 的 效果它都有，让AI 对 话 开发效率翻倍！ 这款Ant Design...\", \"snippet\": \"项目提供开箱即用 的 对 话 式UI组件，支持消息气泡、智 能 建议、思维链展示等特色 功 能 ，特别适合快速搭建智 能 客服、AI 助 手 类应用。 核心 功 能 亮点. 智 能 对 话 容器. Conversations组件实现消息流式渲染，支持自动滚动和加载动画。\", \"url\": \"https://cloud.tencent.com/developer/article/2505799\"}, {\"title\": \"蝉妈妈AI - 蝉妈妈推出 的 AI智 能 对 话 工 具 ，聚焦电商场景 | AI工 具 集\", \"snippet\": \"智 能 对 话 ：用户可随时开启新 的 AI 对 话 任务，支持多种电商场景下 的 智 能 问答。 历 史 对 话 同步：登录后可查看和管理 历 史 对 话 记录，便于复盘和持续优化。\", \"url\": \"https://ai-bot.cn/chanmama-ai/\"}, {\"title\": \"translate.yandex.com/kk - Яндекс Аудармашы\", \"snippet\": \"\", \"url\": \"https://translate.yandex.com/kk/\"}, {\"title\": \"GPTImage2 手 机版下载-GPTImage2智 能 绘图软件下载v1.2025.329...\", \"snippet\": \"GPTImage2 的 使用教程. 1、首先点击下方 的 对 话 框，进入输入状态。 2、接着输入想要上传 的 图片关键词，描述你期望生成 的 画面内容。 3、点击右下方 的 模型选项，可以切换不同 的 AI生成模型以获得不同风格效果。\", \"url\": \"https://www.beihangsoft.cn/app/7997.html\"}, {\"title\": \"AVG PC TuneUp 2015 用户 手 册 | AI Chat & PDF下载 | Manualzz\", \"snippet\": \"同 时 还 搜 索 Windows Media Player 或 Microsoft Office 等 各 种 程 序 的 历 史 记 录 中 是 否 有无效记录项。\", \"url\": \"https://manualzz.com/doc/6162020/avg-pc-tuneup-用户手册\"}]}}}]}",
+      "timestamp": "2026-04-26T08:13:28.240895+00:00",
+      "session_id": "0c7d9872"
+    }
+  ],
+  "trip_history": [],
+  "statistics": {
+    "total_trips": 0,
+    "total_messages": 10,
+    "total_queries": 0,
+    "frequent_destinations": {}
+  }
+}

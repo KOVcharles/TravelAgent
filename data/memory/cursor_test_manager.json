@@ -1,0 +1,14 @@
+{
+  "user_id": "cursor_test_manager",
+  "preferences": {
+    "seat_preference": "靠窗"
+  },
+  "chat_history": [],
+  "trip_history": [],
+  "statistics": {
+    "total_trips": 0,
+    "total_messages": 0,
+    "total_queries": 0,
+    "frequent_destinations": {}
+  }
+}
