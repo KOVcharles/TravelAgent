@@ -33,8 +33,8 @@ from utils.circuit_breaker import CircuitBreaker, CircuitOpenError
 from utils.llm_resilience import retry_with_backoff, run_health_check as check_llm_health
 from agents.intention_agent import IntentionAgent
 from agents.orchestration_agent import OrchestrationAgent
-from mcp.mcp_manager import MCPManager
-from mcp.mcp_config import MCPConfig
+from aligo_mcp.mcp_manager import MCPManager
+from aligo_mcp.mcp_config import MCPConfig
 # 移除其他智能体的导入，改用懒加载
 
 

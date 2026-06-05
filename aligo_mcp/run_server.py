@@ -6,17 +6,17 @@ Aligo MCP Server 启动入口
 
 启动方式：
     # Stdio 模式（Claude Desktop / Cursor 集成）
-    python mcp/run_server.py
+    python aligo_mcp/run_server.py
 
     # 或通过绝对路径
-    python e:/PythonProject/ProjetcAgent/mcp/run_server.py
+    python e:/PythonProject/ProjetcAgent/aligo_mcp/run_server.py
 
 Claude Desktop 配置示例（claude_desktop_config.json）：
 {
     "mcpServers": {
         "aligo": {
             "command": "python",
-            "args": ["e:/PythonProject/ProjetcAgent/mcp/run_server.py"]
+            "args": ["e:/PythonProject/ProjetcAgent/aligo_mcp/run_server.py"]
         }
     }
 }
@@ -29,7 +29,7 @@ _project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _project_root not in sys.path:
     sys.path.insert(0, _project_root)
 
-from mcp.aligo_mcp_server import server
+from aligo_mcp.aligo_mcp_server import server
 
 
 def main():

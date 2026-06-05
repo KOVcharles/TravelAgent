@@ -27,13 +27,13 @@ class AligoMCPServer:
     Aligo MCP Server - 将行程规划、偏好管理、知识问答等能力暴露为 MCP Tools。
 
     使用方式：
-        python mcp/run_server.py
+        python aligo_mcp/run_server.py
     或通过 Claude Desktop 配置：
         {
             "mcpServers": {
                 "aligo": {
                     "command": "python",
-                    "args": ["mcp/run_server.py"]
+                    "args": ["aligo_mcp/run_server.py"]
                 }
             }
         }

@@ -32,11 +32,26 @@ wheels/
 
 # AgentScope
 .agentscope/
+.agents/
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+config.py
+config.local.py
 
 # Data
 data/rag_knowledge/
 data/preferences/*.json
 !data/preferences/.gitkeep
+data/memory/*.json
+data/memory_test/
+data/models/
+
+# Test and benchmark output
+tests/results/
+benchmark-results/
 
 # Logs
 *.log

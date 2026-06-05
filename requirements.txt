@@ -14,6 +14,12 @@ sentence-transformers==5.2.3
 # CLI 界面
 rich==13.9.4
 
+# FastAPI WebUI
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+jinja2==3.1.5
+pydantic==2.10.4
+
 # 网络搜索（DDGS）
 ddgs==9.10.0
 
@@ -23,3 +29,9 @@ redis>=5.0.0,<7.0.0
 
 # 长期记忆 PostgreSQL 存储
 psycopg[binary]
+
+# Test runner
+pytest==8.3.4
+
+# Skill metadata parsing
+PyYAML==6.0.2

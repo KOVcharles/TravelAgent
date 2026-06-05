@@ -9,10 +9,6 @@ import json
 import logging
 import uuid
 
-import psycopg
-from psycopg.rows import dict_row
-from psycopg.types.json import Jsonb
-
 logger = logging.getLogger(__name__)
 
 
@@ -233,6 +229,11 @@ class PostgresLongTermMemory:
 
         if not self.postgres_dsn:
             raise ValueError("postgres_dsn is required when long-term memory backend is 'postgres'")
+        import psycopg
+        from psycopg.rows import dict_row
+        from psycopg.types.json import Jsonb
+
+        self._jsonb = Jsonb
         self.conn = psycopg.connect(self.postgres_dsn, autocommit=True, row_factory=dict_row)
         self._init_schema()
         self._ensure_user_stats_row()
@@ -320,7 +321,7 @@ class PostgresLongTermMemory:
                 ON CONFLICT (user_id, pref_type)
                 DO UPDATE SET pref_value = EXCLUDED.pref_value, updated_at = NOW();
                 """,
-                (self.user_id, pref_type, Jsonb(value)),
+                (self.user_id, pref_type, self._jsonb(value)),
             )
         logger.info(f"Saved preference: {pref_type} = {value}")
 

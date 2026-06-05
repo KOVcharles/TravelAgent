@@ -6,7 +6,6 @@ from typing import List, Dict, Any
 from datetime import datetime
 import json
 import logging
-import redis
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +53,8 @@ class ShortTermMemory:
         self.redis_client = None
 
         if self.backend == "redis":
+            import redis
+
             self.redis_client = redis.Redis(
                 host=redis_host,
                 port=redis_port,
