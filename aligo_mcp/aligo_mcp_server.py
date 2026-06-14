@@ -18,6 +18,7 @@ if _project_root not in sys.path:
     sys.path.insert(0, _project_root)
 
 from mcp.server.fastmcp import FastMCP
+from runtime import create_agent_runtime
 
 logger = logging.getLogger(__name__)
 
@@ -43,47 +44,28 @@ class AligoMCPServer:
         self._model = None
         self._memory_manager = None
         self._intention_agent = None
+        self._agent_registry = None
+        self._orchestrator = None
         self._agent_cache = {}
         self._initialized = False
 
     async def initialize(self):
-        """初始化 Aligo 核心组件（模型、记忆、Agent）"""
+        """Initialize the shared Aligo runtime for MCP tools."""
         if self._initialized:
             return
 
-        from config_agentscope import init_agentscope
-        from config import LLM_CONFIG, MEMORY_CONFIG
-        from agentscope.model import OpenAIChatModel
-        from context.memory_manager import MemoryManager
-        from agents.intention_agent import IntentionAgent
-
-        # 初始化 AgentScope
-        init_agentscope()
-
-        # 初始化模型
-        self._model = OpenAIChatModel(
-            model_name=LLM_CONFIG["model_name"],
-            api_key=LLM_CONFIG["api_key"],
-            client_kwargs={
-                "base_url": LLM_CONFIG["base_url"],
-                "timeout": 60.0,
-            },
-            temperature=LLM_CONFIG.get("temperature", 0.7),
-            max_tokens=LLM_CONFIG.get("max_tokens", 2000),
-        )
-
-        # 初始化记忆管理器
-        self._memory_manager = MemoryManager(
+        runtime = create_agent_runtime(
             user_id="mcp_user",
             session_id="mcp_session",
-            llm_model=self._model,
+            agent_cache=self._agent_cache,
         )
 
-        # 初始化意图识别 Agent
-        self._intention_agent = IntentionAgent(
-            name="IntentionAgent",
-            model=self._model,
-        )
+        self._model = runtime.model
+        self._memory_manager = runtime.memory_manager
+        self._intention_agent = runtime.intention_agent
+        self._agent_registry = runtime.agent_registry
+        self._orchestrator = runtime.orchestrator
+        self._agent_cache = runtime.agent_cache
 
         self._initialized = True
         logger.info("Aligo MCP Server initialized")
@@ -151,8 +133,6 @@ async def plan_trip(
     try:
         # 使用完整的 Agent 流水线
         from agentscope.message import Msg
-        from agents.orchestration_agent import OrchestrationAgent
-        from agents.lazy_agent_registry import LazyAgentRegistry
 
         # 意图识别
         context_msgs = [Msg(name="user", content=user_query, role="user")]
@@ -167,26 +147,16 @@ async def plan_trip(
             ]
 
         # 调度执行
-        lazy_registry = LazyAgentRegistry(
-            model=_aligo._model,
-            cache=_aligo._agent_cache,
-            memory_manager=_aligo._memory_manager,
-        )
-        orchestrator = OrchestrationAgent(
-            name="OrchestrationAgent",
-            agent_registry=lazy_registry,
-            memory_manager=_aligo._memory_manager,
-        )
 
-        orch_result = await orchestrator.reply(
+        orch_result = await _aligo._orchestrator.reply(
             Msg(name="intention", content=json.dumps(intention_data, ensure_ascii=False), role="assistant")
         )
         result_data = json.loads(orch_result.content)
 
         # 提取行程信息
         for r in result_data.get("results", []):
-            if r.get("result", {}).get("agent_name") == "itinerary_planning":
-                itinerary = r["result"].get("data", {}).get("itinerary")
+            if r.get("agent_name") == "itinerary_planning":
+                itinerary = r.get("data", {}).get("itinerary")
                 if itinerary:
                     return json.dumps(itinerary, ensure_ascii=False, indent=2)
 
@@ -210,15 +180,8 @@ async def query_travel_policy(question: str) -> str:
 
     try:
         from agentscope.message import Msg
-        from agents.lazy_agent_registry import LazyAgentRegistry
 
-        lazy_registry = LazyAgentRegistry(
-            model=_aligo._model,
-            cache=_aligo._agent_cache,
-            memory_manager=_aligo._memory_manager,
-        )
-
-        rag_agent = lazy_registry["rag_knowledge"]
+        rag_agent = _aligo._agent_registry["rag_knowledge"]
         result = await rag_agent.reply(
             [Msg(name="user", content=question, role="user")]
         )
@@ -244,15 +207,8 @@ async def get_weather(city: str) -> str:
 
     try:
         from agentscope.message import Msg
-        from agents.lazy_agent_registry import LazyAgentRegistry
 
-        lazy_registry = LazyAgentRegistry(
-            model=_aligo._model,
-            cache=_aligo._agent_cache,
-            memory_manager=_aligo._memory_manager,
-        )
-
-        info_agent = lazy_registry["information_query"]
+        info_agent = _aligo._agent_registry["information_query"]
         result = await info_agent.reply(
             [Msg(name="user", content=f"{city}天气", role="user")]
         )
@@ -278,15 +234,8 @@ async def search_web(query: str) -> str:
 
     try:
         from agentscope.message import Msg
-        from agents.lazy_agent_registry import LazyAgentRegistry
 
-        lazy_registry = LazyAgentRegistry(
-            model=_aligo._model,
-            cache=_aligo._agent_cache,
-            memory_manager=_aligo._memory_manager,
-        )
-
-        info_agent = lazy_registry["information_query"]
+        info_agent = _aligo._agent_registry["information_query"]
         result = await info_agent.reply(
             [Msg(name="user", content=f"搜索 {query}", role="user")]
         )

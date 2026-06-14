@@ -1,10 +1,13 @@
 """
-Configuration reference for the Aligo multi-agent system.
+Runtime settings for the Aligo multi-agent system.
 
-Runtime code reads settings.py, which loads values from environment variables.
-Do not put real API keys in this file.
+Do not put real API keys in this file. Set ALIGO_API_KEY in your shell or
+local .env file instead.
 """
 import os
+
+from dotenv import load_dotenv
+load_dotenv()  # 加载项目根目录的 .env 文件
 
 
 def _bool_env(name: str, default: bool) -> bool:

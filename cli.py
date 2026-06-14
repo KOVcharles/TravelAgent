@@ -7,6 +7,7 @@ Aligo 商旅助手 - CLI 交互界面
 import asyncio
 import sys
 import os
+import logging
 from typing import Optional
 
 # 添加项目根目录到路径
@@ -25,17 +26,17 @@ from rich.text import Text
 import json
 
 # 导入系统组件
-from agentscope.model import OpenAIChatModel
-from config_agentscope import init_agentscope
-from config import LLM_CONFIG, SYSTEM_CONFIG, RESILIENCE_CONFIG
-from context.memory_manager import MemoryManager
-from utils.circuit_breaker import CircuitBreaker, CircuitOpenError
+from settings import LLM_CONFIG, MEMORY_CONFIG, RESILIENCE_CONFIG
+from runtime import create_agent_runtime, create_circuit_breaker
+from utils.circuit_breaker import CircuitOpenError
 from utils.llm_resilience import retry_with_backoff, run_health_check as check_llm_health
-from agents.intention_agent import IntentionAgent
-from agents.orchestration_agent import OrchestrationAgent
 from aligo_mcp.mcp_manager import MCPManager
 from aligo_mcp.mcp_config import MCPConfig
+from core.intent_router import FastIntentRouter
+from core.onboarding import InitialPreferenceOnboarding, detect_city_from_ip
 # 移除其他智能体的导入，改用懒加载
+
+logger = logging.getLogger(__name__)
 
 
 class AligoCLI:
@@ -53,6 +54,9 @@ class AligoCLI:
         self.mcp_manager = None  # MCP 客户端管理器
         self._agent_cache = {}  # 智能体缓存
         self.circuit_breaker = None  # 在 initialize_system 中从 RESILIENCE_CONFIG 初始化
+        self.onboarding = InitialPreferenceOnboarding()
+        self._summary_cache: Optional[str] = None
+        self._summary_msg_count = 0
 
     def print_banner(self):
         """打印欢迎横幅"""
@@ -91,65 +95,21 @@ class AligoCLI:
         import uuid
         self.session_id = str(uuid.uuid4())[:8]
 
-        with self.console.status("初始化中...", spinner="dots"):
-            # 初始化AgentScope
-            init_agentscope()
-
-            # 初始化模型
-            timeout_sec = SYSTEM_CONFIG.get("timeout", 60)
-            self.model = OpenAIChatModel(
-                model_name=LLM_CONFIG["model_name"],
-                api_key=LLM_CONFIG["api_key"],
-                client_kwargs={
-                    "base_url": LLM_CONFIG["base_url"],
-                    "timeout": float(timeout_sec),
-                },
-                temperature=LLM_CONFIG.get("temperature", 0.7),
-                max_tokens=LLM_CONFIG.get("max_tokens", 2000),
-            )
-
-            # 初始化记忆管理器（传入LLM模型用于总结）
-            self.memory_manager = MemoryManager(
+        with self.console.status("Initializing...", spinner="dots"):
+            runtime = create_agent_runtime(
                 user_id=self.user_id,
                 session_id=self.session_id,
-                llm_model=self.model
+                agent_cache=self._agent_cache,
             )
+            self.model = runtime.model
+            self.memory_manager = runtime.memory_manager
+            self.intention_agent = runtime.intention_agent
+            self.orchestrator = runtime.orchestrator
+            self._agent_cache = runtime.agent_cache
+            lazy_registry = runtime.agent_registry
+            self.circuit_breaker = create_circuit_breaker()
 
-            # 初始化意图识别智能体（必须预加载）
-            self.intention_agent = IntentionAgent(
-                name="IntentionAgent",
-                model=self.model
-            )
-
-            # 使用懒加载注册器（智能体在首次使用时才加载）
-            from agents.lazy_agent_registry import LazyAgentRegistry
-            self._agent_cache = {}
-            lazy_registry = LazyAgentRegistry(
-                model=self.model, 
-                cache=self._agent_cache,
-                memory_manager=self.memory_manager
-            )
-
-            # 预先加载关键智能体（可选，利用 preload）
-            # lazy_registry.preload("memory_query", "preference")
-
-            # 初始化协调器
-            self.orchestrator = OrchestrationAgent(
-                name="OrchestrationAgent",
-                agent_registry=lazy_registry,
-                memory_manager=self.memory_manager
-            )
-
-            # 熔断器（连接与可用性）
-            rc = RESILIENCE_CONFIG
-            self.circuit_breaker = CircuitBreaker(
-                failure_threshold=rc.get("circuit_failure_threshold", 5),
-                recovery_timeout_sec=rc.get("circuit_recovery_timeout_sec", 60.0),
-                half_open_successes=rc.get("circuit_half_open_successes", 2),
-            )
-
-            # ── MCP 集成：初始化 MCP 客户端管理器 ──
-            from config import MCP_CONFIG as mcp_cfg_raw
+            from settings import MCP_CONFIG as mcp_cfg_raw
             mcp_config = MCPConfig.from_dict(mcp_cfg_raw)
             self.mcp_manager = MCPManager(
                 servers_config=mcp_config.get_enabled_servers(),
@@ -168,13 +128,86 @@ class AligoCLI:
                     self.console.print(f"[dim]✓ MCP 已连接: {', '.join(connected)}[/dim]")
 
         self.console.print(f"✓ 就绪 (用户: {self.user_id}) - 输入 help 查看帮助\n", style="green")
+        self._run_onboarding_if_needed()
+
+    def _run_onboarding_if_needed(self):
+        """Collect initial preferences for first-time CLI users."""
+        if not self.memory_manager or not self.onboarding.needs_onboarding(self.memory_manager):
+            return
+
+        self.console.print(
+            "\n[bold cyan]首次使用设置[/bold cyan]\n"
+            "我先记录几项基础偏好，后续规划会更贴近你的习惯。直接回车可跳过单项。\n",
+            style="dim",
+        )
+
+        detected_city = self._detect_home_city_for_onboarding()
+        questions = [
+            ("home_location", "常驻城市", detected_city),
+            ("transportation_preference", "交通偏好", None),
+            ("hotel_brands", "酒店偏好", None),
+            ("seat_preference", "座位偏好", None),
+        ]
+
+        for key, label, preferred in questions:
+            state = self.onboarding.get_state(self.memory_manager)
+            if key not in state.get("missing_keys", []):
+                continue
+
+            value = self._ask_onboarding_value(key, label, preferred)
+            if not value:
+                continue
+
+            result = self.onboarding.save_answer(self.memory_manager, key, value)
+            message = result.get("message") or f"已记录：{label}为「{value}」。"
+            self.console.print(f"[green]✓ {message}[/green]")
+
+        if not self.onboarding.needs_onboarding(self.memory_manager):
+            self.console.print("[green]✓ 初始偏好设置完成[/green]\n")
+        else:
+            self.console.print("[dim]初始偏好尚未完整，之后可以通过自然语言继续告诉我。[/dim]\n")
+
+    def _detect_home_city_for_onboarding(self):
+        """Optionally detect a default home city from public IP."""
+        if not Confirm.ask("是否尝试通过公网 IP 推测常驻城市？", default=False):
+            return None
+        with self.console.status("正在尝试定位城市...", spinner="dots"):
+            city = detect_city_from_ip()
+        if city:
+            self.console.print(f"[dim]检测到可能的城市：{city}[/dim]")
+            return city
+        self.console.print("[dim]未能通过 IP 推测城市，将使用默认城市选项。[/dim]")
+        return None
+
+    def _ask_onboarding_value(self, key: str, label: str, preferred=None) -> str:
+        """Ask one onboarding question with selectable options."""
+        options = self.onboarding.get_options(key, preferred=preferred)
+        self.console.print(f"\n[bold]{label}[/bold]")
+        for index, option in enumerate(options, start=1):
+            marker = " [green](推荐)[/green]" if index == 1 else ""
+            self.console.print(f"  {index}. {option}{marker}")
+        self.console.print("  0. 手动输入")
+        self.console.print("  s. 跳过")
+
+        choice = Prompt.ask("请选择", default="").strip()
+        if choice == "":
+            return options[0] if options else ""
+        if choice.lower() == "s":
+            return ""
+        if choice == "0":
+            return Prompt.ask(f"请输入{label}", default="").strip()
+        if choice.isdigit():
+            selected = int(choice)
+            if 1 <= selected <= len(options):
+                return options[selected - 1]
+        return choice
 
     async def process_query(self, user_input: str):
         """
         处理用户查询（原逻辑保留；仅在入口加熔断检查、对 LLM 调用加重试）
         """
         import time
-        start_time = time.time()
+        start_time = time.perf_counter()
 
         # ---------- 仅新增：熔断检查 ----------
         if self.circuit_breaker:
@@ -193,33 +226,46 @@ class AligoCLI:
         with self.console.status("思考中...", spinner="dots"):
             from agentscope.message import Msg
 
-            # 1. 获取长期记忆摘要与上下文（原逻辑不变）
-            long_term_summary = await self._get_long_term_summary(user_input)
-            recent_context = self.memory_manager.short_term.get_recent_context(n_turns=5)
-            context_messages = []
-            if long_term_summary:
-                context_messages.append(Msg(name="system", content=long_term_summary, role="system"))
-            for msg in recent_context:
-                context_messages.append(Msg(name=msg["role"], content=msg["content"], role=msg["role"]))
-            context_messages.append(Msg(name="user", content=user_input, role="user"))
+            fast_route = FastIntentRouter.route(user_input)
+            fast_agent = None
+            if fast_route and len(fast_route.agent_schedule) == 1:
+                fast_agent = fast_route.agent_schedule[0].get("agent_name")
 
-            # 2. 意图识别（仅此调用加重试，原逻辑不变）
             intention_result = None
-            try:
-                intention_result = await retry_with_backoff(
-                    lambda: self.intention_agent.reply(context_messages),
-                    max_retries=max_retries,
-                    base_delay_sec=rc.get("retry_base_delay_sec", 1.0),
-                    max_delay_sec=rc.get("retry_max_delay_sec", 30.0),
+            if fast_agent in {"rag_knowledge", "information_query", "chitchat"}:
+                intention_data = fast_route.to_intention_data(user_input)
+                intention_result = Msg(
+                    name="IntentionAgent",
+                    content=json.dumps(intention_data, ensure_ascii=False),
+                    role="assistant",
                 )
-                if self.circuit_breaker:
-                    self.circuit_breaker.record_success()
-            except CircuitOpenError:
-                raise
-            except Exception as e:
-                if self.circuit_breaker:
-                    self.circuit_breaker.record_failure()
-                raise
+            else:
+                # 1. 获取长期记忆摘要与上下文（原逻辑不变）
+                long_term_summary = await self._get_cached_summary(user_input)
+                recent_context = self.memory_manager.short_term.get_recent_context(n_turns=5)
+                context_messages = []
+                if long_term_summary:
+                    context_messages.append(Msg(name="system", content=long_term_summary, role="system"))
+                for msg in recent_context:
+                    context_messages.append(Msg(name=msg["role"], content=msg["content"], role=msg["role"]))
+                context_messages.append(Msg(name="user", content=user_input, role="user"))
+
+                # 2. 意图识别（仅此调用加重试，原逻辑不变）
+                try:
+                    intention_result = await retry_with_backoff(
+                        lambda: self.intention_agent.reply(context_messages),
+                        max_retries=max_retries,
+                        base_delay_sec=rc.get("retry_base_delay_sec", 1.0),
+                        max_delay_sec=rc.get("retry_max_delay_sec", 30.0),
+                    )
+                    if self.circuit_breaker:
+                        self.circuit_breaker.record_success()
+                except CircuitOpenError:
+                    raise
+                except Exception as e:
+                    if self.circuit_breaker:
+                        self.circuit_breaker.record_failure()
+                    raise
 
             # 3. 解析意图识别结果（原逻辑不变：解析失败则友好提示并 return）
             try:
@@ -261,6 +307,7 @@ class AligoCLI:
         self.console.print()
         self._display_results(result_data)
         self.memory_manager.add_message("assistant", json.dumps(result_data, ensure_ascii=False))
+        logger.info("CLI query completed in %.3fs", time.perf_counter() - start_time)
 
     def _display_agents_called(self, result_data: dict):
         """显示调用的智能体列表"""
@@ -273,16 +320,20 @@ class AligoCLI:
         for result in results:
             agent_name = result.get("agent_name", "")
             status = result.get("status", "")
+            duration_sec = result.get("duration_sec")
 
             display_name = self._get_agent_display_name(agent_name)
+            duration_label = ""
+            if isinstance(duration_sec, (int, float)):
+                duration_label = f" {duration_sec:.2f}s"
 
             # 根据状态添加标记
             if status == "success":
-                agents_called.append(f"{display_name} ✓")
+                agents_called.append(f"{display_name} ✓{duration_label}")
             elif status == "error":
-                agents_called.append(f"{display_name} ✗")
+                agents_called.append(f"{display_name} ✗{duration_label}")
             else:
-                agents_called.append(f"{display_name} ?")
+                agents_called.append(f"{display_name} ?{duration_label}")
 
         if agents_called:
             self.console.print()
@@ -316,6 +367,20 @@ class AligoCLI:
 
         self.console.print()
 
+    async def _get_cached_summary(self, user_input: str = "") -> str:
+        """Return cached long-term summary to avoid one LLM call per CLI turn."""
+        stats = self.memory_manager.short_term.get_statistics()
+        current_count = int(stats.get("total_messages", 0))
+
+        if self._summary_cache is None or current_count - self._summary_msg_count >= 5:
+            summary = await self._get_long_term_summary(user_input)
+            if summary:
+                self._summary_cache = summary
+                self._summary_msg_count = current_count
+            return summary or self._summary_cache or ""
+
+        return self._summary_cache or ""
+
     async def _get_long_term_summary(self, user_input: str = "") -> str:
         """
         生成长期记忆摘要，用于传递给IntentionAgent
@@ -348,7 +413,7 @@ class AligoCLI:
                 summary_parts.extend(pref_lines)
 
         # 2. 使用LLM总结历史聊天记录
-        chat_summary = await self.memory_manager.get_long_term_summary_async(max_messages=50)
+        chat_summary = await self.memory_manager.get_long_term_summary_async(max_messages=20)
         if chat_summary:
             summary_parts.append("\n【历史会话总结】")
             summary_parts.append(chat_summary)
@@ -605,6 +670,13 @@ class AligoCLI:
                     self.console.print(f"\n{query_result}")
                     current_agent_shown = True
 
+            # 闲聊
+            elif agent_name == "chitchat":
+                chat_response = data.get("response", "")
+                if chat_response:
+                    self.console.print(f"\n{chat_response}")
+                    current_agent_shown = True
+
             # MCP 工具调用
             elif agent_name == "mcp_tool":
                 tool_result = data.get("result", "")
@@ -628,7 +700,7 @@ class AligoCLI:
             # --- 通用兜底 (如果特定逻辑未生效) ---
             if not current_agent_shown:
                 # 尝试查找通用字段
-                common_keys = ["answer", "content", "result", "message", "summary", "text", "description"]
+                common_keys = ["answer", "content", "result", "message", "summary", "text", "description", "response"]
                 fallback_content = ""
                 
                 # 扁平查找
@@ -668,6 +740,7 @@ class AligoCLI:
             "rag_knowledge": "知识库查询",
             "memory_query": "记忆查询",
             "mcp_tool": "MCP 工具",
+            "chitchat": "闲聊",
         }
         return agent_display_names.get(agent_name, agent_name)
 

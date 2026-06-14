@@ -1,11 +1,14 @@
 # Python
 __pycache__/
+.tmp_pycache/
+.pytest_cache/
 *.py[cod]
 *$py.class
 *.so
 .Python
 env/
 venv/
+.venv/
 ENV/
 build/
 develop-eggs/
@@ -26,9 +29,13 @@ wheels/
 # IDEs
 .vscode/
 .idea/
+.cursor/
 *.swp
 *.swo
 *~
+
+# Temporary files
+.tmp_webui_*.log
 
 # AgentScope
 .agentscope/
@@ -43,11 +50,19 @@ config.local.py
 
 # Data
 data/rag_knowledge/
+data/rag_scratch/
+.claude/skills/*/data/rag_knowledge/
+.claude/skills/*/data/documents/
 data/preferences/*.json
 !data/preferences/.gitkeep
 data/memory/*.json
+data/memory/**/*.json
+!data/memory/.gitkeep
 data/memory_test/
 data/models/
+*.db
+*.sqlite
+*.sqlite3
 
 # Test and benchmark output
 tests/results/

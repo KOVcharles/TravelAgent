@@ -19,6 +19,8 @@ main boundaries explicit so later refactors can be done safely.
 - `webui_new/`: current FastAPI web application.
 - `webui.py`: legacy Gradio web entry point retained for compatibility.
 - `cli.py`: command-line entry point.
+- `runtime.py`: shared factory for model, memory, registry, and orchestrator wiring.
+- `settings.py`: tracked runtime configuration that reads environment variables.
 - `utils/`: shared infrastructure helpers.
 - `data/`: local runtime data and large assets. New runtime data should not be
   committed.

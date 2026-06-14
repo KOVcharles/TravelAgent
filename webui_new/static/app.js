@@ -287,40 +287,23 @@
 
     function sendOnboardingAnswer(text) {
         const step = onboardingSteps[onboardingIndex];
-        // Build natural language message
-        let message;
-        switch (step.key) {
-            case 'home_location':
-                message = `我的常驻城市是${text}`;
-                break;
-            case 'transportation_preference':
-                message = `我出行喜欢坐${text}`;
-                break;
-            case 'hotel_brands':
-                message = `我偏好${text}酒店`;
-                break;
-            case 'seat_preference':
-                message = `我座位偏好${text}`;
-                break;
-            default:
-                message = `我的${step.key}是${text}`;
-        }
 
         isProcessing = true;
         showProcessingIndicator([]);
 
-        fetch(`/api/${user_id}/chat`, {
+        fetch(`/api/${user_id}/onboarding/preference`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ message: message }),
+            body: JSON.stringify({ key: step.key, value: text }),
         })
         .then(res => res.json())
         .then(data => {
             removeProcessingIndicator();
-            if (data.error) {
-                addMessage('ai', `✅ 已记录「${text}」`);
+            if (data.error || data.success === false) {
+                addMessage('ai', `❌ ${data.error || '偏好保存失败，请重试'}`);
+                return;
             } else {
-                addTypedMessage(data.response || `✅ 已记录「${text}」`);
+                addTypedMessage(data.message || `✅ 已记录「${text}」`);
             }
             // Refresh panel
             loadUserSummary();
@@ -477,6 +460,56 @@
         nextLine();
     }
 
+    function createStreamingMessage() {
+        const row = document.createElement('div');
+        row.className = 'message-row ai';
+        row.style.animation = 'none';
+
+        const avatar = document.createElement('div');
+        avatar.className = 'msg-avatar ai';
+        avatar.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>`;
+
+        const wrap = document.createElement('div');
+        wrap.style.maxWidth = '100%';
+        const bubble = document.createElement('div');
+        bubble.className = 'msg-bubble ai';
+        const time = document.createElement('div');
+        time.className = 'msg-time';
+
+        wrap.appendChild(bubble);
+        row.appendChild(avatar);
+        row.appendChild(wrap);
+        chatMessages.appendChild(row);
+        scrollToBottom();
+
+        return { bubble, wrap, time, text: '' };
+    }
+
+    function renderMessageText(text) {
+        return text
+            .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+            .replace(/•/g, '&bull;')
+            .replace(/\n/g, '<br>');
+    }
+
+    function finishStreamingMessage(streamMsg) {
+        if (!streamMsg) return;
+        streamMsg.time.textContent = formatTime(new Date());
+        streamMsg.wrap.appendChild(streamMsg.time);
+        scrollToBottom();
+    }
+
+    function updateAgentTags(agents) {
+        if (!agents || agents.length === 0) return;
+        const indicator = document.getElementById('processingIndicator');
+        if (!indicator) return;
+        const tags = indicator.querySelector('.agent-tags');
+        if (!tags) return;
+        tags.innerHTML = agents.map(a =>
+            `<span class="agent-tag done">${a.display}</span>`
+        ).join('');
+    }
+
     async function sendMessage() {
         const text = chatInput.value.trim();
         if (!text || isProcessing || isOnboarding) return;
@@ -493,7 +526,7 @@
         showProcessingIndicator([]);
 
         try {
-            const res = await fetch(`/api/${user_id}/chat`, {
+            const res = await fetch(`/api/${user_id}/chat/stream`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ message: text }),
@@ -501,41 +534,83 @@
 
             if (!res.ok) {
                 const err = await res.json();
-                removeProcessingIndicator();
-                addMessage('ai', `❌ ${err.error || '请求失败，请重试'}`);
-                return;
+                throw new Error(err.error || '请求失败，请重试');
             }
 
-            const data = await res.json();
-            if (data.error) {
-                removeProcessingIndicator();
-                addMessage('ai', `❌ ${data.error}`);
-                return;
+            if (!res.body) {
+                throw new Error('Streaming response is not supported');
             }
 
-            if (data.agents && data.agents.length > 0) {
-                // Update indicator with actual agents then show response
-                const indicator = document.getElementById('processingIndicator');
-                if (indicator) {
-                    const tags = indicator.querySelector('.agent-tags');
-                    if (tags) {
-                        tags.innerHTML = data.agents.map(a =>
-                            `<span class="agent-tag done">${a.display}</span>`
-                        ).join('');
+            const reader = res.body.getReader();
+            const decoder = new TextDecoder('utf-8');
+            let buffer = '';
+            let streamMsg = null;
+            let preferencesUpdated = false;
+
+            while (true) {
+                const { value, done } = await reader.read();
+                if (done) break;
+
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop() || '';
+
+                for (const line of lines) {
+                    if (!line.trim()) continue;
+                    const event = JSON.parse(line);
+
+                    if (event.type === 'error') {
+                        throw new Error(event.error || '处理失败，请重试');
+                    }
+
+                    if (event.type === 'agents') {
+                        updateAgentTags(event.agents);
+                    }
+
+                    if (event.type === 'chunk') {
+                        if (!streamMsg) {
+                            removeProcessingIndicator();
+                            streamMsg = createStreamingMessage();
+                        }
+                        streamMsg.text += event.text || '';
+                        streamMsg.bubble.innerHTML = renderMessageText(streamMsg.text);
+                        scrollToBottom();
+                    }
+
+                    if (event.type === 'done') {
+                        preferencesUpdated = !!event.preferences_updated;
                     }
                 }
-                await sleep(300);
+            }
+
+            if (buffer.trim()) {
+                const event = JSON.parse(buffer);
+                if (event.type === 'chunk') {
+                    if (!streamMsg) {
+                        removeProcessingIndicator();
+                        streamMsg = createStreamingMessage();
+                    }
+                    streamMsg.text += event.text || '';
+                    streamMsg.bubble.innerHTML = renderMessageText(streamMsg.text);
+                }
+                if (event.type === 'done') {
+                    preferencesUpdated = !!event.preferences_updated;
+                }
             }
 
             removeProcessingIndicator();
-            addTypedMessage(data.response || '✓ 已收到您的请求。');
+            if (streamMsg) {
+                finishStreamingMessage(streamMsg);
+            } else {
+                addTypedMessage('✓ 已收到您的请求。');
+            }
 
-            if (data.preferences_updated) {
+            if (preferencesUpdated) {
                 await loadUserSummary();
             }
         } catch (err) {
             removeProcessingIndicator();
-            addMessage('ai', '❌ 网络错误，请检查连接后重试');
+            addMessage('ai', `❌ ${err.message || '网络错误，请检查连接后重试'}`);
         }
 
         isProcessing = false;

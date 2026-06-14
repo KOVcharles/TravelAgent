@@ -8,7 +8,7 @@ import os
 import sys
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from jinja2 import Environment, FileSystemLoader
 from pydantic import BaseModel
@@ -53,6 +53,11 @@ class LoginRequest(BaseModel):
 
 class ChatRequest(BaseModel):
     message: str
+
+
+class OnboardingPreferenceRequest(BaseModel):
+    key: str
+    value: str
 
 
 # ── 页面路由 ──────────────────────────────────────────────
@@ -116,6 +121,43 @@ async def is_new_user(user_id: str):
         return {"is_new": True}
 
 
+@app.get("/api/{user_id}/onboarding")
+async def get_onboarding_state(user_id: str):
+    """获取新用户初始化偏好进度"""
+    instance = manager.get(user_id)
+    if not instance or not instance.initialized:
+        return {"is_new": True, "completed": False, "missing_keys": []}
+    try:
+        return await instance.get_onboarding_state()
+    except Exception as e:
+        logger.error(f"Onboarding state failed for {user_id}: {e}")
+        return {"is_new": True, "completed": False, "missing_keys": []}
+
+
+@app.post("/api/{user_id}/onboarding/preference")
+async def save_onboarding_preference(user_id: str, data: OnboardingPreferenceRequest):
+    """保存新用户初始化偏好，不经过普通聊天链路"""
+    instance = manager.get(user_id)
+    if not instance or not instance.initialized:
+        return JSONResponse(
+            status_code=400,
+            content={"success": False, "error": "系统未初始化，请刷新页面"},
+        )
+    try:
+        return await instance.save_onboarding_preference(data.key, data.value)
+    except ValueError as e:
+        return JSONResponse(
+            status_code=400,
+            content={"success": False, "error": str(e)},
+        )
+    except Exception as e:
+        logger.error(f"Onboarding preference failed for {user_id}: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"success": False, "error": f"保存初始化偏好失败: {str(e)}"},
+        )
+
+
 @app.get("/api/{user_id}/summary")
 async def get_user_summary(user_id: str):
     """获取用户摘要信息（右侧面板）"""
@@ -172,3 +214,38 @@ async def send_message(user_id: str, data: ChatRequest):
             status_code=500,
             content={"error": f"处理失败: {str(e)}"},
         )
+
+
+@app.post("/api/{user_id}/chat/stream")
+async def stream_message(user_id: str, data: ChatRequest):
+    """Stream chat progress and response chunks as newline-delimited JSON."""
+    instance = manager.get(user_id)
+    if not instance or not instance.initialized:
+        return JSONResponse(
+            status_code=400,
+            content={"error": "系统未初始化，请刷新页面"},
+        )
+
+    if not data.message.strip():
+        return JSONResponse(
+            status_code=400,
+            content={"error": "请输入消息"},
+        )
+
+    async def event_stream():
+        try:
+            logger.info(f"[{user_id}] -> {data.message}")
+            async for event in instance.stream_message(data.message):
+                yield json.dumps(event, ensure_ascii=False) + "\n"
+        except Exception as e:
+            logger.error(f"Streaming chat failed for {user_id}: {e}")
+            yield json.dumps(
+                {"type": "error", "error": f"处理失败: {str(e)}"},
+                ensure_ascii=False,
+            ) + "\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="application/x-ndjson; charset=utf-8",
+        headers={"Cache-Control": "no-cache"},
+    )

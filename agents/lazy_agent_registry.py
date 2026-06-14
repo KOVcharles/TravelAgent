@@ -3,7 +3,7 @@
 """
 Lazy plugin registry for skill-backed agents.
 
-The runtime skill root is controlled by config.SKILL_CONFIG["root"] or the
+The runtime skill root is controlled by settings.SKILL_CONFIG["root"] or the
 ALIGO_SKILLS_ROOT environment variable. It defaults to .claude/skills for
 backward compatibility with the current repository layout.
 """
@@ -16,7 +16,7 @@ from typing import Any, Dict, Optional
 from agentscope.agent import AgentBase
 from rich.console import Console
 
-from config import SKILL_CONFIG
+from settings import SKILL_CONFIG
 
 
 class LazyAgentRegistry:

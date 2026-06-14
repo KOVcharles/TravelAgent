@@ -3,7 +3,7 @@ AgentScope Configuration for Aligo Multi-Agent Travel Planning System
 适配 AgentScope 1.0.16+
 """
 import agentscope
-from config import LLM_CONFIG
+from settings import LLM_CONFIG
 
 def init_agentscope():
     """

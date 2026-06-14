@@ -7,6 +7,12 @@
 import sys
 import os
 from pathlib import Path
+import pytest
+
+pytestmark = pytest.mark.skipif(
+    os.getenv("ALIGO_RUN_LLM_TESTS", "").lower() not in {"1", "true", "yes"},
+    reason="LLM integration tests are disabled by default",
+)
 
 # 添加项目根目录到路径
 project_root = Path(__file__).parent.parent
@@ -25,7 +31,7 @@ logging.basicConfig(
 )
 
 # 从配置文件读取LLM配置
-from config import LLM_CONFIG
+from settings import LLM_CONFIG
 
 
 def print_section(title):

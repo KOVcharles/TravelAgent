@@ -1,0 +1,163 @@
+from pathlib import Path
+
+from rag.chunker import split_text
+from rag.document_loader import load_text_documents
+from rag.milvus_store import MilvusKnowledgeStore, fuse_results, rerank_results
+from rag.retriever import expand_query
+
+
+def test_load_text_documents_reads_txt_files(tmp_path: Path):
+    doc = tmp_path / "01_travel_standards.txt"
+    doc.write_text("Travel Standards\n\n北京住宿标准。", encoding="utf-8")
+
+    documents = load_text_documents(str(tmp_path))
+
+    assert len(documents) == 1
+    assert documents[0].title == "Travel Standards"
+    assert documents[0].category == "travel_policy"
+    assert documents[0].metadata["parent_doc"] == "01_travel_standards.txt"
+
+
+def test_split_text_keeps_small_paragraphs_together():
+    text = "第一段\n\n第二段\n\n第三段"
+
+    chunks = split_text(text, max_chars=20, overlap=5)
+
+    assert chunks == ["第一段\n\n第二段\n\n第三段"]
+
+
+def test_split_text_keeps_faq_questions_as_separate_topics():
+    text = "\n\n".join(
+        [
+            "Q9: 酒店价格超过标准怎么办？\nA9: 按标准报销。",
+            "Q10: 到店后发现房间有问题怎么办？\nA10: 联系酒店处理。",
+            "Q12: 出差期间的所有餐费都能报销吗？\nA12: 午餐和晚餐每餐不超过100元。",
+        ]
+    )
+
+    chunks = split_text(text, max_chars=600, overlap=100)
+
+    assert len(chunks) == 3
+    assert chunks[-1].startswith("Q12")
+    assert "Q9" not in chunks[-1]
+
+
+def test_fuse_results_prefers_docs_seen_by_both_retrievers():
+    vector_docs = [
+        {"id": 1, "content": "北京住宿标准", "metadata": {}, "distance": 0.9},
+        {"id": 2, "content": "成都交通建议", "metadata": {}, "distance": 0.8},
+    ]
+    bm25_docs = [
+        {"id": 1, "content": "北京住宿标准", "metadata": {}, "bm25_score": 3.0},
+        {"id": 3, "content": "上海报销要求", "metadata": {}, "bm25_score": 2.0},
+    ]
+
+    results = fuse_results(vector_docs, bm25_docs, top_k=3)
+
+    assert results[0]["id"] == 1
+    assert results[0]["vector_rank"] == 1
+    assert results[0]["bm25_rank"] == 1
+
+
+def test_meal_allowance_query_expands_and_reranks_meal_policy():
+    query = expand_query("我出差有餐补吗")
+    docs = [
+        {"id": 1, "content": "国际出差有每日补贴，标准因国家而异", "metadata": {}, "fusion_score": 0.04},
+        {"id": 2, "content": "午餐和晚餐可报销，每餐不超过100元；个人零食、酒水不予报销", "metadata": {}, "fusion_score": 0.02},
+    ]
+
+    results = rerank_results(docs, query)
+
+    assert "餐费" in query
+    assert results[0]["id"] == 2
+
+
+def test_rebuild_collection_recovers_from_windows_manifest_replace_error(tmp_path: Path):
+    collection_name = "business_travel_knowledge"
+    collection_dir = tmp_path / "collections" / collection_name
+    collection_dir.mkdir(parents=True)
+    (collection_dir / "manifest.json").write_text("old", encoding="utf-8")
+    (collection_dir / "manifest.json.tmp").write_text("tmp", encoding="utf-8")
+
+    class DropFailingClient:
+        def has_collection(self, name):
+            return True
+
+        def drop_collection(self, name):
+            raise RuntimeError(
+                "[WinError 183] Cannot create a file when that file already exists: "
+                "'manifest.json.tmp' -> 'manifest.json'"
+            )
+
+        def close(self):
+            pass
+
+    class ResetClient:
+        def __init__(self):
+            self.created = False
+
+        def has_collection(self, name):
+            return False
+
+        def create_collection(self, **kwargs):
+            self.created = True
+
+        def load_collection(self, name):
+            pass
+
+        def close(self):
+            pass
+
+    store = object.__new__(MilvusKnowledgeStore)
+    store.client = DropFailingClient()
+    store.collection_name = collection_name
+    store.embedding_dim = 384
+    store.milvus_uri = str(tmp_path)
+    reset_client = ResetClient()
+    store._reset_client = lambda: setattr(store, "client", reset_client)
+
+    store.rebuild_collection()
+
+    assert not collection_dir.exists()
+    assert reset_client.created is True
+
+
+def test_rebuild_collection_prepares_windows_manifest_before_drop(tmp_path: Path, monkeypatch):
+    collection_name = "business_travel_knowledge"
+    collection_dir = tmp_path / "collections" / collection_name
+    collection_dir.mkdir(parents=True)
+    manifest_path = collection_dir / "manifest.json"
+    manifest_path.write_text("old", encoding="utf-8")
+
+    class DropSucceedsClient:
+        def __init__(self):
+            self.saw_manifest_at_drop = None
+            self.created = False
+
+        def has_collection(self, name):
+            return True
+
+        def drop_collection(self, name):
+            self.saw_manifest_at_drop = manifest_path.exists()
+
+        def create_collection(self, **kwargs):
+            self.created = True
+
+        def load_collection(self, name):
+            pass
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr("rag.milvus_store.os.name", "nt")
+    client = DropSucceedsClient()
+    store = object.__new__(MilvusKnowledgeStore)
+    store.client = client
+    store.collection_name = collection_name
+    store.embedding_dim = 384
+    store.milvus_uri = str(tmp_path)
+
+    store.rebuild_collection()
+
+    assert client.saw_manifest_at_drop is False
+    assert client.created is True

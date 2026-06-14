@@ -22,11 +22,11 @@ from agentscope.model import OpenAIChatModel
 
 # Import from absolute paths
 import config_agentscope
-import config
+import settings
 from agents.intention_agent import IntentionAgent
 from agents.orchestration_agent import OrchestrationAgent
 
-LLM_CONFIG = config.LLM_CONFIG
+LLM_CONFIG = settings.LLM_CONFIG
 init_agentscope = config_agentscope.init_agentscope
 
 # Import agents

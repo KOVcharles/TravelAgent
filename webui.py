@@ -16,10 +16,11 @@ sys.path.insert(0, project_root)
 
 import gradio as gr
 
+# Legacy Gradio entry point. New WebUI development should target webui_new/.
 from agents.intention_agent import IntentionAgent
 from agents.lazy_agent_registry import LazyAgentRegistry
 from agents.orchestration_agent import OrchestrationAgent
-from config import LLM_CONFIG, SYSTEM_CONFIG, RESILIENCE_CONFIG
+from settings import LLM_CONFIG, SYSTEM_CONFIG, RESILIENCE_CONFIG
 from config_agentscope import init_agentscope
 from context.memory_manager import MemoryManager
 from utils.circuit_breaker import CircuitBreaker, CircuitOpenError

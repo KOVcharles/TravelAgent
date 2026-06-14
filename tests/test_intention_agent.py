@@ -11,6 +11,12 @@ import sys
 import os
 import asyncio
 import json
+import pytest
+
+pytestmark = pytest.mark.skipif(
+    os.getenv("ALIGO_RUN_LLM_TESTS", "").lower() not in {"1", "true", "yes"},
+    reason="LLM integration tests are disabled by default",
+)
 
 # 添加项目根目录到 Python 路径
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -39,7 +45,7 @@ from agentscope.message import Msg
 from agentscope.model import OpenAIChatModel
 from config_agentscope import init_agentscope
 from agents.intention_agent import IntentionAgent
-from config import LLM_CONFIG
+from settings import LLM_CONFIG
 
 
 async def test_intention_agent():

@@ -5,7 +5,7 @@
 from typing import Dict, Any
 from .short_term_memory import ShortTermMemory
 from .long_term_memory import DisabledLongTermMemory, FileLongTermMemory, PostgresLongTermMemory
-from config import MEMORY_CONFIG
+from settings import MEMORY_CONFIG
 import logging
 
 logger = logging.getLogger(__name__)
@@ -161,7 +161,7 @@ class MemoryManager:
         self.short_term.clear()
         logger.info(f"Session ended: {self.session_id}")
 
-    async def get_long_term_summary_async(self, max_messages: int = 50) -> str:
+    async def get_long_term_summary_async(self, max_messages: int = 20) -> str:
         """
         使用LLM总结长期聊天历史（异步版本）
 
@@ -264,7 +264,7 @@ class MemoryManager:
             logger.error(f"Traceback: {traceback.format_exc()}")
             return ""
 
-    def get_long_term_summary(self, max_messages: int = 50) -> str:
+    def get_long_term_summary(self, max_messages: int = 20) -> str:
         """
         使用LLM总结长期聊天历史（同步版本）
 

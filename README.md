@@ -433,7 +433,6 @@ shanglv/
 ├── .claude/skills/                  # Skill Plugins (子智能体)
 │   ├── ask-question/                # 知识库问答 Skill
 │   │   ├── script/                  # 代码 (agent.py, init_script)
-│   │   ├── data/                    # 数据 (documents, milvus db)
 │   │   └── SKILL.md                 # 技能定义
 │   ├── event-collection/            # 事项收集 Skill
 │   ├── plan-trip/                   # 行程规划 Skill
@@ -517,8 +516,8 @@ shanglv/
 
 ### 知识库初始化
 - 首次运行前必须初始化RAG知识库
-- 知识库文档位于 `.claude/skills/ask-question/data/documents/`
-- Milvus数据库文件生成在 `.claude/skills/ask-question/data/milvus_travel_kb.db`
+- 知识库源文档位于 `data/documents/`
+- Milvus 本地向量库生成在 `data/rag_knowledge/`
 
 ### 性能优化
 - 懒加载机制：系统启动时仅扫描Skill元数据，首次调用时才加载

@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import sys
+import time
 import uuid
 from typing import Optional
 
@@ -14,13 +15,14 @@ project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, project_root)
 
 from agents.intention_agent import IntentionAgent
-from agents.lazy_agent_registry import LazyAgentRegistry
 from agents.orchestration_agent import OrchestrationAgent
-from config import LLM_CONFIG, SYSTEM_CONFIG, RESILIENCE_CONFIG
-from config_agentscope import init_agentscope
+from settings import RESILIENCE_CONFIG
 from context.memory_manager import MemoryManager
+from runtime import create_agent_runtime, create_circuit_breaker
 from utils.circuit_breaker import CircuitBreaker, CircuitOpenError
 from utils.llm_resilience import retry_with_backoff
+from core.onboarding import InitialPreferenceOnboarding
+from core.intent_router import FastIntentRouter
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +61,7 @@ class AligoWebInstance:
         self.model = None
         self._agent_cache = {}
         self.circuit_breaker: Optional[CircuitBreaker] = None
+        self.onboarding = InitialPreferenceOnboarding()
         self.initialized = False
         self.init_error: Optional[str] = None
 
@@ -68,51 +71,20 @@ class AligoWebInstance:
         self._total_messages: int = 0              # 本会话消息计数
 
     async def initialize(self):
-        """初始化所有组件"""
+        """Initialize the shared Aligo runtime for this web user."""
         try:
-            init_agentscope()
-            timeout_sec = SYSTEM_CONFIG.get("timeout", 60)
-            from agentscope.model import OpenAIChatModel
-
-            self.model = OpenAIChatModel(
-                model_name=LLM_CONFIG["model_name"],
-                api_key=LLM_CONFIG["api_key"],
-                client_kwargs={
-                    "base_url": LLM_CONFIG["base_url"],
-                    "timeout": float(timeout_sec),
-                },
-                temperature=LLM_CONFIG.get("temperature", 0.7),
-                max_tokens=LLM_CONFIG.get("max_tokens", 2000),
-            )
-
-            self.memory_manager = MemoryManager(
+            runtime = create_agent_runtime(
                 user_id=self.user_id,
                 session_id=self.session_id,
-                llm_model=self.model,
+                agent_cache=self._agent_cache,
             )
 
-            self.intention_agent = IntentionAgent(
-                name="IntentionAgent", model=self.model,
-            )
-
-            lazy_registry = LazyAgentRegistry(
-                model=self.model,
-                cache=self._agent_cache,
-                memory_manager=self.memory_manager,
-            )
-
-            self.orchestrator = OrchestrationAgent(
-                name="OrchestrationAgent",
-                agent_registry=lazy_registry,
-                memory_manager=self.memory_manager,
-            )
-
-            rc = RESILIENCE_CONFIG
-            self.circuit_breaker = CircuitBreaker(
-                failure_threshold=rc.get("circuit_failure_threshold", 5),
-                recovery_timeout_sec=rc.get("circuit_recovery_timeout_sec", 60.0),
-                half_open_successes=rc.get("circuit_half_open_successes", 2),
-            )
+            self.model = runtime.model
+            self.memory_manager = runtime.memory_manager
+            self.intention_agent = runtime.intention_agent
+            self.orchestrator = runtime.orchestrator
+            self._agent_cache = runtime.agent_cache
+            self.circuit_breaker = create_circuit_breaker()
 
             self.initialized = True
         except Exception as e:
@@ -123,10 +95,10 @@ class AligoWebInstance:
     async def get_preferences(self) -> dict:
         """获取用户偏好"""
         if not self.memory_manager:
-            return {}
+            return {"preferences": [], "raw": {}}
         prefs = self.memory_manager.long_term.get_preference()
         if not prefs:
-            return {}
+            return {"preferences": [], "raw": {}}
         # 转换为前端友好格式
         display_map = {
             "home_location": ("常驻地", "📍"),
@@ -151,14 +123,19 @@ class AligoWebInstance:
         """检查是否为新用户（没有任何偏好设置）"""
         if not self.memory_manager:
             return True
-        prefs = self.memory_manager.long_term.get_preference()
-        if not prefs:
-            return True
-        # 检查是否有实际内容
-        for key, value in prefs.items():
-            if value:
-                return False
-        return True
+        return self.onboarding.needs_onboarding(self.memory_manager)
+
+    async def get_onboarding_state(self) -> dict:
+        """Return first-run preference setup progress."""
+        if not self.memory_manager:
+            return {"is_new": True, "completed": False, "missing_keys": []}
+        return self.onboarding.get_state(self.memory_manager)
+
+    async def save_onboarding_preference(self, key: str, value: str) -> dict:
+        """Save one first-run preference without using the chat pipeline."""
+        if not self.memory_manager:
+            return {"success": False, "error": "系统未初始化"}
+        return self.onboarding.save_answer(self.memory_manager, key, value)
 
     async def get_user_summary(self) -> dict:
         """获取用户摘要信息（用于右侧面板）"""
@@ -208,6 +185,9 @@ class AligoWebInstance:
         """处理用户消息，返回响应"""
         from agentscope.message import Msg
 
+        start_time = time.perf_counter()
+        timings = {}
+
         if not self.initialized:
             return {"error": "系统未初始化"}
 
@@ -220,33 +200,48 @@ class AligoWebInstance:
 
         rc = RESILIENCE_CONFIG
         max_retries = rc.get("max_retries", 3)
+        fast_route = self._route_without_context(message)
 
-        # ═══ 优化 2: 缓存长期记忆摘要，避免每次都 LLM 总结 ═══
-        # 同时构建上下文和意图识别可以部分重叠
-        context_future = asyncio.ensure_future(self._build_context(message))
-
-        # 2. Intent recognition
-        try:
-            if self.circuit_breaker:
-                self.circuit_breaker.raise_if_open()
-
-            context_messages = await context_future
-
-            intention_result = await retry_with_backoff(
-                lambda: self.intention_agent.reply(context_messages),
-                max_retries=max_retries,
-                base_delay_sec=rc.get("retry_base_delay_sec", 1.0),
-                max_delay_sec=rc.get("retry_max_delay_sec", 30.0),
+        if fast_route:
+            intention_data = fast_route.to_intention_data(message)
+            intention_result = Msg(
+                name="IntentionAgent",
+                content=json.dumps(intention_data, ensure_ascii=False),
+                role="assistant",
             )
-            if self.circuit_breaker:
-                self.circuit_breaker.record_success()
-        except CircuitOpenError:
-            return {"error": "服务暂时不可用，请稍后再试。"}
-        except Exception as e:
-            if self.circuit_breaker:
-                self.circuit_breaker.record_failure()
-            logger.error(f"Intention agent failed: {e}")
-            return {"error": f"处理请求时出错: {e}"}
+            timings["context"] = 0.0
+            timings["intent"] = 0.0
+        else:
+            # ═══ 优化 2: 缓存长期记忆摘要，避免每次都 LLM 总结 ═══
+            # 同时构建上下文和意图识别可以部分重叠
+            context_future = asyncio.ensure_future(self._build_context(message))
+
+            # 2. Intent recognition
+            try:
+                if self.circuit_breaker:
+                    self.circuit_breaker.raise_if_open()
+
+                context_start = time.perf_counter()
+                context_messages = await context_future
+                timings["context"] = time.perf_counter() - context_start
+
+                intent_start = time.perf_counter()
+                intention_result = await retry_with_backoff(
+                    lambda: self.intention_agent.reply(context_messages),
+                    max_retries=max_retries,
+                    base_delay_sec=rc.get("retry_base_delay_sec", 1.0),
+                    max_delay_sec=rc.get("retry_max_delay_sec", 30.0),
+                )
+                timings["intent"] = time.perf_counter() - intent_start
+                if self.circuit_breaker:
+                    self.circuit_breaker.record_success()
+            except CircuitOpenError:
+                return {"error": "服务暂时不可用，请稍后再试。"}
+            except Exception as e:
+                if self.circuit_breaker:
+                    self.circuit_breaker.record_failure()
+                logger.error(f"Intention agent failed: {e}")
+                return {"error": f"处理请求时出错: {e}"}
 
         try:
             intention_data = json.loads(intention_result.content)
@@ -258,12 +253,14 @@ class AligoWebInstance:
 
         # 3. Orchestration
         try:
+            orchestration_start = time.perf_counter()
             orchestration_result = await retry_with_backoff(
                 lambda: self.orchestrator.reply(intention_result),
                 max_retries=max_retries,
                 base_delay_sec=rc.get("retry_base_delay_sec", 1.0),
                 max_delay_sec=rc.get("retry_max_delay_sec", 30.0),
             )
+            timings["orchestration"] = time.perf_counter() - orchestration_start
             if self.circuit_breaker:
                 self.circuit_breaker.record_success()
         except CircuitOpenError:
@@ -299,16 +296,63 @@ class AligoWebInstance:
                 "name": name,
                 "display": AGENT_DISPLAY_NAMES.get(name, name),
                 "status": status,
+                "duration_sec": r.get("duration_sec"),
             })
 
         # 7. Check if preferences were updated
         prefs_updated = any(r.get("agent_name") == "preference" and r.get("status") == "success" for r in results)
+        timings["total"] = time.perf_counter() - start_time
+        logger.info(
+            "WebUI message timing for %s: %s",
+            self.user_id,
+            {key: round(value, 3) for key, value in timings.items()},
+        )
 
         return {
             "response": response,
             "agents": agents,
             "preferences_updated": prefs_updated,
+            "timings": {key: round(value, 3) for key, value in timings.items()},
         }
+
+    async def stream_message(self, message: str):
+        """Yield JSON-serializable progress and response events for Web streaming."""
+        yield {"type": "status", "message": "processing"}
+        result = await self.process_message(message)
+        if result.get("error"):
+            yield {"type": "error", "error": result["error"]}
+            return
+
+        agents = result.get("agents", [])
+        if agents:
+            yield {"type": "agents", "agents": agents}
+
+        response = result.get("response") or ""
+        for chunk in self._chunk_text(response):
+            yield {"type": "chunk", "text": chunk}
+            await asyncio.sleep(0.01)
+
+        yield {
+            "type": "done",
+            "preferences_updated": result.get("preferences_updated", False),
+            "timings": result.get("timings", {}),
+        }
+
+    @staticmethod
+    def _chunk_text(text: str, size: int = 18):
+        for idx in range(0, len(text), size):
+            yield text[idx:idx + size]
+
+    @staticmethod
+    def _route_without_context(message: str):
+        """Run cheap routing before building memory context for context-free intents."""
+        route = FastIntentRouter.route(message)
+        if not route or len(route.agent_schedule) != 1:
+            return None
+        agent_name = route.agent_schedule[0].get("agent_name")
+        if agent_name in {"rag_knowledge", "information_query", "chitchat"}:
+            return route
+        return None
 
     async def _build_context(self, message: str) -> list:
         """构建上下文消息（可与其他异步任务并行）"""
@@ -341,7 +385,7 @@ class AligoWebInstance:
             if len(pref_lines) > 1:
                 summary_parts.extend(pref_lines)
 
-        chat_summary = await self.memory_manager.get_long_term_summary_async(max_messages=50)
+        chat_summary = await self.memory_manager.get_long_term_summary_async(max_messages=20)
         if chat_summary:
             summary_parts.append("\n【历史会话总结】")
             summary_parts.append(chat_summary)

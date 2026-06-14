@@ -56,7 +56,7 @@ async def main():
     # 初始化系统 - 完全按照 CLI 的方式
     print("\n[1/3] 初始化系统...")
 
-    from config import LLM_CONFIG
+    from settings import LLM_CONFIG
     from config_agentscope import init_agentscope
     from agentscope.model import OpenAIChatModel
     from context.memory_manager import MemoryManager

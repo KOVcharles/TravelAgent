@@ -3,7 +3,7 @@ from typing import Dict, Optional
 
 import yaml
 
-from config import SKILL_CONFIG
+from settings import SKILL_CONFIG
 
 
 class SkillLoader:

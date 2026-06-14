@@ -19,6 +19,7 @@ from typing import Optional, Union, List
 import json
 import logging
 from utils.skill_loader import SkillLoader
+from core.intent_router import FastIntentRouter
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +65,11 @@ class IntentionAgent(AgentBase):
                         self.conversation_history.append(f"{role_name}: {content}")
         else:
             user_query = x.content
+
+        fast_route = FastIntentRouter.route(user_query)
+        if fast_route:
+            result = fast_route.to_intention_data(user_query)
+            return Msg(name=self.name, content=json.dumps(result, ensure_ascii=False), role="assistant")
 
         # 构建上下文
         # 策略：长期记忆始终保留，短期对话全部保留（已在 cli.py 控制数量）
@@ -213,6 +219,39 @@ class IntentionAgent(AgentBase):
 
 请开始分析，直接输出JSON：
 """
+
+        prompt = f"""请把用户输入路由到合适的智能体，只输出 JSON，不要输出解释。
+
+当前时间: {current_time} {weekday}
+用户输入: {user_query}
+必要上下文: {context_str}
+
+可选智能体:
+- chitchat: 寒暄、感谢、告别、闲聊
+- preference: 用户表达或更新个人偏好
+- memory_query: 查询用户自己的历史、偏好、过去行程
+- event_collection: 收集行程基础信息
+- itinerary_planning: 规划未来行程，通常依赖 event_collection
+- information_query: 天气、实时信息、普通搜索
+- rag_knowledge: 差旅标准、报销、政策、制度问答
+- mcp_tool: 需要外部 MCP 工具操作
+
+调度规则:
+- 简单单意图只调一个 agent，priority=1。
+- 行程规划请求调 event_collection(priority=1) 后调 itinerary_planning(priority=2)。
+- 查询“我的/我之前/我去过”优先 memory_query。
+- 差旅标准、报销、政策优先 rag_knowledge。
+
+输出 JSON schema:
+{{
+  "reasoning": "一句话说明",
+  "intents": [{{"type": "intent_name", "confidence": 0.0, "description": "", "reason": ""}}],
+  "key_entities": {{"origin": null, "destination": null, "date": null, "duration": null, "other": null}},
+  "rewritten_query": "{user_query}",
+  "agent_schedule": [
+    {{"agent_name": "agent_name", "priority": 1, "reason": "", "expected_output": ""}}
+  ]
+}}"""
 
         # 调用LLM进行意图识别
         try:

@@ -19,6 +19,7 @@ from typing import Optional, Union, List, Dict, Any
 import json
 import logging
 import asyncio
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -316,9 +317,12 @@ class OrchestrationAgent(AgentBase):
             role="user"
         )
 
+        start_time = time.perf_counter()
         try:
             # 调用智能体
             response = await agent.reply(input_msg)
+            duration_sec = time.perf_counter() - start_time
+            logger.info("Agent %s completed in %.3fs", agent_name, duration_sec)
 
             # 解析响应
             if isinstance(response.content, str):
@@ -336,6 +340,7 @@ class OrchestrationAgent(AgentBase):
                 return {
                     "status": "error",
                     "agent_name": agent_name,
+                    "duration_sec": duration_sec,
                     "data": result,
                     "message": error_msg
                 }
@@ -343,15 +348,18 @@ class OrchestrationAgent(AgentBase):
             return {
                 "status": "success",
                 "agent_name": agent_name,
+                "duration_sec": duration_sec,
                 "data": result
             }
 
         except Exception as e:
+            duration_sec = time.perf_counter() - start_time
             logger.error(f"Agent execution failed: {agent_name}, error: {e}")
             # 返回友好的错误信息，但不中断流程
             return {
                 "status": "error",
                 "agent_name": agent_name,
+                "duration_sec": duration_sec,
                 "data": {"error": str(e)},
                 "message": f"智能体执行失败: {str(e)}"
             }
@@ -387,6 +395,7 @@ class OrchestrationAgent(AgentBase):
                 "agent_name": result["agent_name"],
                 "priority": result["priority"],
                 "status": result["result"].get("status", "unknown"),
+                "duration_sec": result["result"].get("duration_sec"),
                 "data": result["result"].get("data", {})
             })
 
@@ -463,9 +472,10 @@ class OrchestrationAgent(AgentBase):
             # 如果是行程规划智能体，保存行程到长期记忆
             if agent_name == "itinerary_planning" and isinstance(data, dict):
                 itinerary = data.get("itinerary", {})
+                planning_complete = data.get("planning_complete")
 
                 # 只要有行程信息就保存（不管是否完全规划好）
-                if itinerary:
+                if itinerary and planning_complete is not False and not data.get("error"):
                     # 提取事项收集的信息（出发地、目的地等）
                     event_data = {}
                     for r in results:
