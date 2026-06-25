@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-Aligo 商旅助手 - CLI 交互界面
+Hommey 商旅助手 - CLI 交互界面
 使用 Rich 库实现美观的终端交互
 """
 import asyncio
@@ -27,11 +27,12 @@ import json
 
 # 导入系统组件
 from settings import LLM_CONFIG, MEMORY_CONFIG, RESILIENCE_CONFIG
+from config_agentscope import init_agentscope
 from runtime import create_agent_runtime, create_circuit_breaker
 from utils.circuit_breaker import CircuitOpenError
 from utils.llm_resilience import retry_with_backoff, run_health_check as check_llm_health
-from aligo_mcp.mcp_manager import MCPManager
-from aligo_mcp.mcp_config import MCPConfig
+from hommey_mcp.mcp_manager import MCPManager
+from hommey_mcp.mcp_config import MCPConfig
 from core.intent_router import FastIntentRouter
 from core.onboarding import InitialPreferenceOnboarding, detect_city_from_ip
 # 移除其他智能体的导入，改用懒加载
@@ -39,8 +40,18 @@ from core.onboarding import InitialPreferenceOnboarding, detect_city_from_ip
 logger = logging.getLogger(__name__)
 
 
-class AligoCLI:
-    """Aligo 商旅助手 CLI"""
+def _clean_text_for_utf8(value: str) -> str:
+    """Remove invalid Unicode surrogate code points before JSON/HTTP encoding."""
+    if not isinstance(value, str):
+        return value
+    return "".join(
+        "\ufffd" if 0xD800 <= ord(ch) <= 0xDFFF else ch
+        for ch in value
+    )
+
+
+class HommeyCLI:
+    """Hommey 商旅助手 CLI"""
 
     def __init__(self):
         """初始化 CLI"""
@@ -60,7 +71,7 @@ class AligoCLI:
 
     def print_banner(self):
         """打印欢迎横幅"""
-        self.console.print("\n[bold cyan]🌏 Aligo 商旅助手[/bold cyan] - 让差旅更简单\n", style="bold")
+        self.console.print("\n[bold cyan]🌏 Hommey 商旅助手[/bold cyan] - 让差旅更简单\n", style="bold")
 
     def print_help(self):
         """打印帮助信息"""
@@ -206,6 +217,7 @@ class AligoCLI:
         """
         处理用户查询（原逻辑保留；仅在入口加熔断检查、对 LLM 调用加重试）
         """
+        user_input = _clean_text_for_utf8(user_input)
         import time
         start_time = time.perf_counter()
 
@@ -879,6 +891,7 @@ class AligoCLI:
             try:
                 # 获取用户输入
                 user_input = Prompt.ask("\n[cyan]>[/cyan]")
+                user_input = _clean_text_for_utf8(user_input)
 
                 if not user_input.strip():
                     continue
@@ -944,7 +957,7 @@ def main():
     """主函数"""
     if len(sys.argv) > 1 and sys.argv[1].strip().lower() == "health":
         exit(run_health_check_standalone())
-    cli = AligoCLI()
+    cli = HommeyCLI()
     asyncio.run(cli.run())
 
 

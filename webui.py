@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-Aligo 商旅助手 - Web 界面
+Hommey 商旅助手 - Web 界面
 基于 Gradio 的精美聊天对话框
 """
 import asyncio
@@ -156,10 +156,10 @@ AGENT_DISPLAY_NAMES = {
 }
 
 
-class WebAligo:
-    """Web 版 Aligo 商旅助手"""
+class WebHommey:
+    """Web 版 Hommey 商旅助手"""
 
-    _instances: dict = {}  # 多用户实例缓存 {user_id: WebAligo}
+    _instances: dict = {}  # 多用户实例缓存 {user_id: WebHommey}
 
     def __init__(self):
         self.user_id = "web_user"
@@ -616,7 +616,7 @@ class WebAligo:
 
 
 # ── 构建 Gradio 界面 ──────────────────────────────────────
-TITLE = "🌏 Aligo 商旅助手"
+TITLE = "🌏 Hommey 商旅助手"
 DESCRIPTION = "基于多智能体的智能差旅规划系统 · 让差旅更简单"
 
 
@@ -631,13 +631,13 @@ async def on_chat(message: str, history: list, uid: str):
         return
 
     # 延迟初始化
-    instance = WebAligo._instances.get(uid.strip())
+    instance = WebHommey._instances.get(uid.strip())
     if instance is None:
         yield history + [[message, "⏳ 正在初始化系统..."]]
-        instance = WebAligo()
+        instance = WebHommey()
         instance.user_id = uid.strip()
         await instance.initialize()
-        WebAligo._instances[uid.strip()] = instance
+        WebHommey._instances[uid.strip()] = instance
         # 重新 yield 去掉初始化消息
         yield history + [[message, ""]]
     else:
@@ -666,7 +666,7 @@ def on_start(uid: str, history: list):
         return history + [["", "⚠️ 请输入有效的用户ID"]], gr.Textbox(value="")
 
     welcome = (
-        f"👋 欢迎，**{uid.strip()}**！我是 Aligo 商旅助手。\n\n"
+        f"👋 欢迎，**{uid.strip()}**！我是 Hommey 商旅助手。\n\n"
         "可以这样问我：\n"
         "• ✈️ 帮我规划去北京的行程\n"
         "• 🌤️ 北京的天气怎么样\n"
@@ -677,7 +677,7 @@ def on_start(uid: str, history: list):
 
 
 with gr.Blocks(
-    title="Aligo 商旅助手",
+    title="Hommey 商旅助手",
 ) as demo:
     gr.HTML(f"""
     <div style="text-align:center; margin-bottom: 16px;">

@@ -1,6 +1,6 @@
 """
-Aligo 商旅助手 - Web 界面管理器
-管理多用户 Aligo 实例的生命周期
+Hommey 商旅助手 - Web 界面管理器
+管理多用户 Hommey 实例的生命周期
 """
 import asyncio
 import json
@@ -37,8 +37,8 @@ AGENT_DISPLAY_NAMES = {
 }
 
 
-class AligoWebInstance:
-    """单个用户的 Aligo 实例"""
+class HommeyWebInstance:
+    """单个用户的 Hommey 实例"""
 
     # 简单闲聊匹配规则（不经过 LLM）
     CHITCHAT_PATTERNS = [
@@ -71,7 +71,7 @@ class AligoWebInstance:
         self._total_messages: int = 0              # 本会话消息计数
 
     async def initialize(self):
-        """Initialize the shared Aligo runtime for this web user."""
+        """Initialize the shared Hommey runtime for this web user."""
         try:
             runtime = create_agent_runtime(
                 user_id=self.user_id,
@@ -156,7 +156,7 @@ class AligoWebInstance:
         """快速判断是否纯闲聊（不经过 LLM）"""
         msg = message.strip().lower()
         # 纯问候/感谢/告别
-        for pattern in AligoWebInstance.CHITCHAT_PATTERNS:
+        for pattern in HommeyWebInstance.CHITCHAT_PATTERNS:
             if msg == pattern or msg.startswith(pattern) and len(msg) < 15:
                 return True
         # 单字/简单表情
@@ -637,21 +637,21 @@ class AligoWebInstance:
         return f"✓ {display}已完成"
 
 
-class WebAligoManager:
-    """管理所有用户的 Aligo 实例"""
+class WebHommeyManager:
+    """管理所有用户的 Hommey 实例"""
 
     def __init__(self):
-        self._instances: dict[str, AligoWebInstance] = {}
+        self._instances: dict[str, HommeyWebInstance] = {}
 
-    def get_or_create(self, user_id: str) -> AligoWebInstance:
+    def get_or_create(self, user_id: str) -> HommeyWebInstance:
         if user_id not in self._instances:
-            self._instances[user_id] = AligoWebInstance(user_id)
+            self._instances[user_id] = HommeyWebInstance(user_id)
         return self._instances[user_id]
 
-    def get(self, user_id: str) -> Optional[AligoWebInstance]:
+    def get(self, user_id: str) -> Optional[HommeyWebInstance]:
         return self._instances.get(user_id)
 
-    async def initialize_user(self, user_id: str) -> AligoWebInstance:
+    async def initialize_user(self, user_id: str) -> HommeyWebInstance:
         instance = self.get_or_create(user_id)
         if not instance.initialized:
             await instance.initialize()

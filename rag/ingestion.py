@@ -1,13 +1,14 @@
-"""Command-line ingestion pipeline for the local RAG knowledge base."""
+"""Command-line and compatibility ingestion entrypoints for the RAG pipeline."""
 from __future__ import annotations
 
 import argparse
+import logging
 from typing import Any, Dict
 
-from settings import RAG_CONFIG
+from .config import RAGPipelineConfig
+from .pipeline import RAGPipeline
 
-from .document_loader import iter_chunks, load_text_documents
-from .retriever import KnowledgeRetriever
+logger = logging.getLogger(__name__)
 
 
 def ingest_documents(
@@ -18,38 +19,39 @@ def ingest_documents(
     max_chars: int = 600,
     overlap: int = 100,
 ) -> Dict[str, Any]:
-    documents = load_text_documents(documents_dir)
-    chunks = list(iter_chunks(documents, max_chars=max_chars, overlap=overlap))
-
-    retriever = KnowledgeRetriever(
-        knowledge_base_path=knowledge_base_path,
-        collection_name=collection_name,
-        top_k=RAG_CONFIG.get("top_k", 3),
-    )
-    if not retriever.initialized:
-        return {"status": "error", "message": retriever.error or "RAG retriever not initialized"}
-
-    try:
-        if rebuild:
-            retriever.rebuild()
-        result = retriever.add_documents(chunks)  # type: ignore[arg-type]
-        return {
-            **result,
-            "documents_loaded": len(documents),
-            "chunks_loaded": len(chunks),
+    config = RAGPipelineConfig.from_settings(
+        {
             "documents_dir": documents_dir,
             "knowledge_base_path": knowledge_base_path,
             "collection_name": collection_name,
+            "chunk_size": max_chars,
+            "chunk_overlap": overlap,
         }
+    )
+    try:
+        pipeline = RAGPipeline(config=config)
+    except Exception as exc:
+        logger.exception("Failed to initialize RAG ingestion pipeline")
+        return {"status": "error", "message": str(exc)}
+
+    try:
+        return {
+            **pipeline.ingest(documents_dir, rebuild=rebuild).to_dict(),
+            "documents_dir": documents_dir,
+        }
+    except Exception as exc:
+        logger.exception("RAG ingestion failed")
+        return {"status": "error", "message": str(exc), "documents_dir": documents_dir}
     finally:
-        retriever.close()
+        pipeline.close()
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Build or update the Aligo RAG knowledge base.")
-    parser.add_argument("--documents-dir", default=RAG_CONFIG.get("documents_dir", "data/documents"))
-    parser.add_argument("--knowledge-base-path", default=RAG_CONFIG.get("knowledge_base_path", "data/rag_knowledge"))
-    parser.add_argument("--collection", default=RAG_CONFIG.get("collection_name", "business_travel_knowledge"))
+    config = RAGPipelineConfig.from_settings()
+    parser = argparse.ArgumentParser(description="Build or update the Hommey RAG knowledge base.")
+    parser.add_argument("--documents-dir", default=config.documents_dir)
+    parser.add_argument("--knowledge-base-path", default=config.knowledge_base_path)
+    parser.add_argument("--collection", default=config.collection_name)
     parser.add_argument("--rebuild", action="store_true")
     args = parser.parse_args()
 
@@ -64,4 +66,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

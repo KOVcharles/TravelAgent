@@ -1,0 +1,66 @@
+services:
+  hommey:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: hommey:latest
+    container_name: hommey-app
+    ports:
+      - "8000:8000"
+    # 仓库根的 .env（含 HOMMEY_API_KEY 等机密）默认不会被 -f docker/ 调用方式读到，
+    # 这里显式注入；environment: 段会覆盖 .env 里的本地开发值，确保容器内用 redis/postgres。
+    env_file:
+      - path: ../.env
+        required: false
+    environment:
+      HOMMEY_MODEL_NAME: ${HOMMEY_MODEL_NAME:-deepseek-v4-flash}
+      HOMMEY_BASE_URL: ${HOMMEY_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1}
+      HOMMEY_HEALTH_CHECK_TIMEOUT_SEC: ${HOMMEY_HEALTH_CHECK_TIMEOUT_SEC:-60}
+      PYTHONUTF8: "1"
+      PYTHONIOENCODING: utf-8
+      HOMMEY_SHORT_TERM_BACKEND: redis
+      HOMMEY_REDIS_HOST: hommey-redis
+      HOMMEY_REDIS_PORT: 6379
+      HOMMEY_LONG_TERM_BACKEND: postgres
+      HOMMEY_POSTGRES_DSN: postgresql://hommey:${PG_PASSWORD:-hommey123}@hommey-postgres:5432/hommey
+      HOMMEY_RAG_DOCUMENTS_DIR: /app/data/documents
+      HOMMEY_RAG_KNOWLEDGE_BASE_PATH: /app/data/rag_knowledge
+      HOMMEY_EMBEDDING_MODEL: /app/data/models/bge-small-zh-v1.5
+    volumes:
+      - ../data/documents:/app/data/documents:ro
+      - ../data/models:/app/data/models:ro
+      - ../data/rag_knowledge:/app/data/rag_knowledge
+    depends_on:
+      redis:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    command: python run_webui.py
+
+  redis:
+    image: redis:7-alpine
+    container_name: hommey-redis
+    volumes:
+      - hommey_redis:/data
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: hommey-postgres
+    environment:
+      POSTGRES_USER: hommey
+      POSTGRES_PASSWORD: ${PG_PASSWORD:-hommey123}
+      POSTGRES_DB: hommey
+    volumes:
+      - hommey_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hommey -d hommey"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  hommey_redis:
+  hommey_pgdata:

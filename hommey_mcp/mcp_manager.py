@@ -37,7 +37,7 @@ class MCPManager:
     职责：
     1. 根据配置创建和管理多个 MCP Client 实例
     2. 自动连接、工具发现与缓存
-    3. LIFO 顺序关闭（AgentScope 要求）
+    3. LIFO 顺序关闭
     4. 与 CircuitBreaker 集成
     5. 提供统一工具调用接口
     """
@@ -359,7 +359,7 @@ class MCPManager:
 
     async def close_all(self) -> None:
         """
-        关闭所有 MCP Client 连接（LIFO 顺序，AgentScope 要求）。
+        关闭所有 MCP Client 连接（LIFO 顺序）。
         应在程序退出时调用。
         """
         if self._closed:

@@ -1,5 +1,5 @@
 /**
- * Aligo 商旅助手 - 前端交互逻辑
+ * Hommey 商旅助手 - 前端交互逻辑
  * 包含新用户引导、聊天、右侧面板更新
  */
 (function() {
@@ -177,7 +177,7 @@
     function startOnboarding() {
         isOnboarding = true;
         addMessage('ai',
-            '👋 **您好！** 看起来您是第一次使用 Aligo，让我先了解一下您的偏好，这样可以为您提供更好的差旅建议！'
+            '👋 **您好！** 看起来您是第一次使用 Hommey，让我先了解一下您的偏好，这样可以为您提供更好的差旅建议！'
         );
         setTimeout(() => showOnboardingQuestion(0), 600);
     }
@@ -339,7 +339,7 @@
         else greeting = '晚上好';
 
         addMessage('ai',
-            `**${greeting}！** 我是 Aligo，您的智能差旅助手。\n\n` +
+            `**${greeting}！** 我是 Hommey，您的智能差旅助手。\n\n` +
             `我可以帮您：\n` +
             `• ✈️ **规划行程** — "帮我规划去上海的行程"\n` +
             `• 🌤️ **查询信息** — "北京的天气怎么样"\n` +

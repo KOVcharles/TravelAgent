@@ -1,4 +1,4 @@
-# Aligo 智能旅行助手
+# Hommey 智能旅行助手
 
 基于**豆包大模型**和**AgentScope框架**的多智能体旅行规划系统，采用Plan-and-Execute架构，实现智能意图识别、两层记忆系统、RAG知识库、联网搜索和优先级并行调度。
 
@@ -38,7 +38,7 @@
 
 ### 🔌 MCP 双向集成（Model Context Protocol）
 - **消费者侧**：通过 `MCPManager` 连接外部 MCP Server（文件系统、数据库、API等），动态发现并调用工具
-- **生产者侧**：`AligoMCPServer` 将行程规划、政策查询、天气搜索等 7 大能力暴露为 MCP Tools，供 Claude Desktop、Cursor 等直接调用
+- **生产者侧**：`HommeyMCPServer` 将行程规划、政策查询、天气搜索等 7 大能力暴露为 MCP Tools，供 Claude Desktop、Cursor 等直接调用
 - **3 种客户端**：StdIO（本地命令行）、HTTP Stateful（远程长连接）、HTTP Stateless（无状态 API）
 - **熔断保护**：MCP 工具调用与 CircuitBreaker 集成，连续失败自动熔断
 - **LIFO 安全关闭**：多 Server 连接按后进先出顺序安全断开

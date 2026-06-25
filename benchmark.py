@@ -16,7 +16,7 @@ sys.path.insert(0, project_root)
 
 logging.basicConfig(level=logging.WARNING, format="%(levelname)s: %(message)s")
 
-from webui_new.manager import AligoWebInstance
+from webui_new.manager import HommeyWebInstance
 
 
 async def test_process_message(instance, label, message):
@@ -37,14 +37,14 @@ async def test_process_message(instance, label, message):
 
 async def main():
     print("╔═══════════════════════════════════════════════╗")
-    print("║     Aligo 性能基准测试 V2                      ║")
+    print("║     Hommey 性能基准测试 V2                      ║")
     print("║     测试 process_message 完整链路              ║")
     print("╚═══════════════════════════════════════════════╝")
 
     # 初始化
     print("\n  ⏳ 初始化测试实例...")
     t0 = time.perf_counter()
-    instance = AligoWebInstance("bench_user")
+    instance = HommeyWebInstance("bench_user")
     await instance.initialize()
     print(f"  ✓ 初始化完成 ({time.perf_counter()-t0:.2f}s)\n")
 

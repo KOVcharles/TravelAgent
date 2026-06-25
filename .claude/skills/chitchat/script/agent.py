@@ -43,7 +43,7 @@ CHITCHAT_RULES = [
                      r"^(在吗|在不在|有人在吗|在么)[\s!！。.,，?？]*$"],
         "category": "greeting",
         "responses": [
-            "你好呀！😊 我是 Aligo 商旅助手，有什么可以帮你的吗？",
+            "你好呀！😊 我是 Hommey 商旅助手，有什么可以帮你的吗？",
             "嗨～我在呢！需要我帮你规划行程、查天气，还是想聊聊天？😄",
             "你好你好！今天有什么出行计划吗？还是就是来打个招呼呀～👋",
         ]
@@ -57,7 +57,7 @@ CHITCHAT_RULES = [
         "responses": [
             "我在随时待命呢！💪 可以帮你：\n📋 规划出差行程\n🔍 搜索目的地信息\n🌤️ 查询天气\n📝 记录偏好习惯\n❓ 回答差旅相关问题\n\n需要我做点什么呢？",
             "嘿嘿，我就是一个勤劳的商旅小助手～ 我能帮你规划行程、查天气、搜信息，还能记住你的偏好。有啥需要尽管说！😊",
-            "我是 Aligo 商旅助手，专门帮你搞定出差各种事儿。规划路线、查天气、搜攻略、记偏好，统统包在我身上！需要什么帮助吗？",
+            "我是 Hommey 商旅助手，专门帮你搞定出差各种事儿。规划路线、查天气、搜攻略、记偏好，统统包在我身上！需要什么帮助吗？",
         ]
     },
     # ---- 感谢类 ----
@@ -139,6 +139,16 @@ def _apply_rules(user_query: str) -> Optional[str]:
     text = user_query.strip()
     if not text:
         return None
+
+    if any(keyword in text for keyword in ("你是什么", "你是谁", "你叫什么", "你能做什么", "你会什么", "介绍一下")):
+        return (
+            "我是 Hommey 商旅助手，可以帮你规划差旅行程、查询天气和目的地信息、"
+            "记录出行偏好，也能回答差旅标准和报销相关问题。你可以直接告诉我想去哪儿，"
+            "或者问我某个城市/政策/行程安排。"
+        )
+
+    if any(keyword in text for keyword in ("你好", "您好", "嗨", "哈喽", "在吗")):
+        return "你好呀！我是 Hommey 商旅助手，有出行规划、差旅政策或目的地信息都可以直接问我。"
 
     for rule in CHITCHAT_RULES:
         if _match_any(rule["patterns"], text):
@@ -272,7 +282,7 @@ class ChitchatAgent(AgentBase):
 
     async def _generate_llm_response(self, user_query: str) -> Optional[str]:
         """调用 LLM 生成自然闲聊回复"""
-        prompt = f"""你是一个友好、轻松的旅行助手，名叫 Aligo。用户正在和你闲聊。
+        prompt = f"""你是一个友好、轻松的旅行助手，名叫 Hommey。用户正在和你闲聊。
 
 用户说：「{user_query}」
 

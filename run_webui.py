@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-Aligo 商旅助手 - 新 Web 界面启动入口
+Hommey 商旅助手 - 新 Web 界面启动入口
 """
 import os
 import sys
@@ -23,7 +23,7 @@ import uvicorn
 if __name__ == "__main__":
     print("""
     ╔═══════════════════════════════════════════╗
-    ║     Aligo 商旅助手 - Web 界面             ║
+    ║     Hommey 商旅助手 - Web 界面             ║
     ║     http://localhost:8000                  ║
     ╚═══════════════════════════════════════════╝
     """)

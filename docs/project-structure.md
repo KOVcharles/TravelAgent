@@ -1,6 +1,6 @@
 # Project Structure
 
-This repository is currently a modular monolith for the Aligo travel agent.
+This repository is currently a modular monolith for the Hommey travel agent.
 The first cleanup pass keeps the existing runtime layout intact, but makes the
 main boundaries explicit so later refactors can be done safely.
 
@@ -12,9 +12,9 @@ main boundaries explicit so later refactors can be done safely.
   - `lazy_agent_registry.py` discovers and lazily loads skill plugins.
 - `.claude/skills/`: canonical runtime skill plugin directory for this branch.
   - Each skill owns its `SKILL.md` metadata and `script/agent.py` implementation.
-  - The runtime path is configurable with `ALIGO_SKILLS_ROOT`.
+  - The runtime path is configurable with `HOMMEY_SKILLS_ROOT`.
 - `context/`: short-term and long-term memory implementations.
-- `aligo_mcp/`: project-owned MCP client/server integration. This name avoids
+- `hommey_mcp/`: project-owned MCP client/server integration. This name avoids
   shadowing the third-party `mcp` protocol package.
 - `webui_new/`: current FastAPI web application.
 - `webui.py`: legacy Gradio web entry point retained for compatibility.
@@ -30,7 +30,7 @@ main boundaries explicit so later refactors can be done safely.
 - Skill discovery now resolves paths from the project root instead of the
   process working directory.
 - Skill metadata loading and skill agent loading now use the same configured
-  root: `ALIGO_SKILLS_ROOT`, defaulting to `.claude/skills`.
+  root: `HOMMEY_SKILLS_ROOT`, defaulting to `.claude/skills`.
 - `.agents/` is treated as a local/generated duplicate and ignored by Git.
 - Secrets are removed from `config.py`; runtime configuration is read from
   environment variables.
@@ -44,7 +44,7 @@ changing behavior:
 
 ```text
 src/
-  aligo/
+  hommey/
     app/
       cli.py
       web/

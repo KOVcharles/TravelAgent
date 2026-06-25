@@ -1,5 +1,5 @@
 """
-Aligo 商旅助手 - FastAPI Web 服务
+Hommey 商旅助手 - FastAPI Web 服务
 提供聊天 API 和页面路由
 """
 import json
@@ -19,7 +19,7 @@ sys.path.insert(0, project_root)
 logger = logging.getLogger(__name__)
 
 # ── FastAPI 应用 ──────────────────────────────────────────
-app = FastAPI(title="Aligo 商旅助手", version="2.0.0")
+app = FastAPI(title="Hommey 商旅助手", version="2.0.0")
 
 # ── 静态文件 & 模板 ──────────────────────────────────────
 static_dir = os.path.join(os.path.dirname(__file__), "static")
@@ -41,9 +41,9 @@ def _render(template_name: str, **context) -> HTMLResponse:
     return HTMLResponse(html)
 
 # ── 管理器 ────────────────────────────────────────────────
-from webui_new.manager import WebAligoManager
+from webui_new.manager import WebHommeyManager
 
-manager = WebAligoManager()
+manager = WebHommeyManager()
 
 
 # ── 数据模型 ──────────────────────────────────────────────

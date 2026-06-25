@@ -131,7 +131,7 @@ def detect_city_from_ip(timeout_sec: float = 1.5) -> Optional[str]:
 
         req = urllib.request.Request(
             "https://ipapi.co/json/",
-            headers={"User-Agent": "AligoCLI/1.0"},
+            headers={"User-Agent": "HommeyCLI/1.0"},
         )
         with urllib.request.urlopen(req, timeout=timeout_sec) as resp:
             payload = json.loads(resp.read().decode("utf-8"))

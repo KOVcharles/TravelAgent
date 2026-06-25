@@ -1,5 +1,5 @@
 """
-Shared runtime factory for Aligo entry points.
+Shared runtime factory for Hommey entry points.
 
 CLI, WebUI, and MCP should create the core agent runtime through this module
 instead of duplicating model, memory, registry, and orchestrator wiring.

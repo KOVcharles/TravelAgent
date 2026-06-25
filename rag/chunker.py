@@ -1,21 +1,56 @@
 """Text chunking utilities for RAG ingestion."""
 from __future__ import annotations
 
+import hashlib
 import re
 from typing import List
 
-from .schemas import KnowledgeChunk, SourceDocument
+from .schemas import DocumentChunk, ParsedDocument, SourceDocument
 
 
 _QUESTION_HEADING_RE = re.compile(r"^Q\d+\s*[:：]", re.IGNORECASE)
-_SECTION_HEADING_RE = re.compile(r"^[一二三四五六七八九十]+、")
-_NUMBERED_HEADING_RE = re.compile(r"^\d+\.\s+\S+")
+_SECTION_HEADING_RE = re.compile(r"^[一二三四五六七八九十]+[、.．]\s*\S+")
+_NUMBERED_HEADING_RE = re.compile(r"^\d+[.．]\s+\S+")
+
+
+class TextChunker:
+    def __init__(self, max_chars: int = 600, overlap: int = 100):
+        self.max_chars = max_chars
+        self.overlap = overlap
+
+    def chunk(self, documents: List[ParsedDocument]) -> List[DocumentChunk]:
+        chunks: List[DocumentChunk] = []
+        chunk_index = 1
+        for document in documents:
+            for content in split_text(document.text, max_chars=self.max_chars, overlap=self.overlap):
+                chunk_hash = _hash_chunk(document.source_path, document.page_number, chunk_index, content)
+                metadata = dict(document.metadata)
+                metadata.setdefault("parent_doc", document.filename)
+                chunks.append(
+                    DocumentChunk(
+                        content=content,
+                        source_path=document.source_path,
+                        filename=document.filename,
+                        file_type=document.file_type,
+                        page_number=document.page_number,
+                        chunk_index=chunk_index,
+                        content_type=document.content_type,
+                        hash=chunk_hash,
+                        title=document.title,
+                        category=document.category,
+                        metadata=metadata,
+                    )
+                )
+                chunk_index += 1
+        return chunks
 
 
 def split_text(text: str, max_chars: int = 600, overlap: int = 100) -> List[str]:
     """Split text into topic-aware chunks with an overlap fallback for long blocks."""
-    paragraphs = _paragraphs(text)
+    if not text.strip():
+        return []
 
+    paragraphs = _paragraphs(text)
     chunks: List[str] = []
     current_chunk = ""
     for paragraph in paragraphs:
@@ -43,6 +78,20 @@ def split_text(text: str, max_chars: int = 600, overlap: int = 100) -> List[str]
     if current_chunk:
         chunks.extend(_split_long_text(current_chunk, max_chars, overlap))
     return chunks
+
+
+def chunk_document(document: SourceDocument, max_chars: int = 600, overlap: int = 100) -> List[DocumentChunk]:
+    parsed = ParsedDocument(
+        text=document.content,
+        source_path=document.source_path,
+        filename=document.filename,
+        file_type=document.file_type,
+        page_number=document.metadata.get("page_number"),
+        title=document.title,
+        category=document.category,
+        metadata=document.metadata,
+    )
+    return TextChunker(max_chars=max_chars, overlap=overlap).chunk([parsed])
 
 
 def _paragraphs(text: str) -> List[str]:
@@ -84,15 +133,6 @@ def _split_long_text(text: str, max_chars: int, overlap: int) -> List[str]:
     return chunks
 
 
-def chunk_document(document: SourceDocument, max_chars: int = 600, overlap: int = 100) -> List[KnowledgeChunk]:
-    return [
-        KnowledgeChunk(
-            content=content,
-            source_path=document.source_path,
-            title=document.title,
-            category=document.category,
-            chunk_index=index,
-            metadata=document.metadata,
-        )
-        for index, content in enumerate(split_text(document.content, max_chars=max_chars, overlap=overlap), start=1)
-    ]
+def _hash_chunk(source_path: str, page_number: int | None, chunk_index: int, content: str) -> str:
+    payload = f"{source_path}:{page_number}:{chunk_index}:{content}".encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()

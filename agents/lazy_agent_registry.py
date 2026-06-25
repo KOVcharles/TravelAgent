@@ -4,7 +4,7 @@
 Lazy plugin registry for skill-backed agents.
 
 The runtime skill root is controlled by settings.SKILL_CONFIG["root"] or the
-ALIGO_SKILLS_ROOT environment variable. It defaults to .claude/skills for
+HOMMEY_SKILLS_ROOT environment variable. It defaults to .claude/skills for
 backward compatibility with the current repository layout.
 """
 import importlib.util
@@ -99,7 +99,7 @@ class LazyAgentRegistry:
 
         try:
             safe_skill_name = skill_name.replace("-", "_")
-            module_name = f"aligo_dynamic_skills.{safe_skill_name}.agent"
+            module_name = f"hommey_dynamic_skills.{safe_skill_name}.agent"
             spec = importlib.util.spec_from_file_location(module_name, script_path)
             if spec is None or spec.loader is None:
                 raise ImportError(f"Cannot load spec from {script_path}")

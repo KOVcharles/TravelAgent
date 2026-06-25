@@ -1,6 +1,6 @@
 """
-Aligo MCP Server
-将 Aligo 商旅助手的核心能力暴露为 MCP Tools，供外部 AI 应用（Claude Desktop、Cursor 等）调用。
+Hommey MCP Server
+将 Hommey 商旅助手的核心能力暴露为 MCP Tools，供外部 AI 应用（Claude Desktop、Cursor 等）调用。
 
 基于 mcp.server.fastmcp.FastMCP，使用装饰器模式注册工具。
 支持 stdio 传输（与 Claude Desktop 兼容）。
@@ -23,18 +23,18 @@ from runtime import create_agent_runtime
 logger = logging.getLogger(__name__)
 
 
-class AligoMCPServer:
+class HommeyMCPServer:
     """
-    Aligo MCP Server - 将行程规划、偏好管理、知识问答等能力暴露为 MCP Tools。
+    Hommey MCP Server - 将行程规划、偏好管理、知识问答等能力暴露为 MCP Tools。
 
     使用方式：
-        python aligo_mcp/run_server.py
+        python hommey_mcp/run_server.py
     或通过 Claude Desktop 配置：
         {
             "mcpServers": {
-                "aligo": {
+                "hommey": {
                     "command": "python",
-                    "args": ["aligo_mcp/run_server.py"]
+                    "args": ["hommey_mcp/run_server.py"]
                 }
             }
         }
@@ -50,7 +50,7 @@ class AligoMCPServer:
         self._initialized = False
 
     async def initialize(self):
-        """Initialize the shared Aligo runtime for MCP tools."""
+        """Initialize the shared Hommey runtime for MCP tools."""
         if self._initialized:
             return
 
@@ -68,21 +68,21 @@ class AligoMCPServer:
         self._agent_cache = runtime.agent_cache
 
         self._initialized = True
-        logger.info("Aligo MCP Server initialized")
+        logger.info("Hommey MCP Server initialized")
 
     def _ensure_initialized(self):
         """同步检查初始化状态（FastMCP 工具是同步的）"""
         if not self._initialized:
-            raise RuntimeError("Aligo MCP Server not initialized. Call initialize() first.")
+            raise RuntimeError("Hommey MCP Server not initialized. Call initialize() first.")
 
 
 # ─── 全局 Server 实例 ───────────────────────────────────────
 
-_aligo = AligoMCPServer()
+_hommey = HommeyMCPServer()
 
 server = FastMCP(
-    name="aligo-travel-assistant",
-    instructions="""Aligo 商旅助手 - 智能差旅规划系统。
+    name="hommey-travel-assistant",
+    instructions="""Hommey 商旅助手 - 智能差旅规划系统。
 提供以下能力：
 - 行程规划：根据出发地、目的地、日期生成完整行程
 - 差旅政策查询：查询企业差旅标准、报销政策
@@ -114,7 +114,7 @@ async def plan_trip(
         purpose: 出行目的，如"出差"、"旅游"（可选）
         duration: 行程时长，如"3天"（可选）
     """
-    await _aligo.initialize()
+    await _hommey.initialize()
 
     from datetime import datetime
     if not date:
@@ -136,7 +136,7 @@ async def plan_trip(
 
         # 意图识别
         context_msgs = [Msg(name="user", content=user_query, role="user")]
-        intention_result = await _aligo._intention_agent.reply(context_msgs)
+        intention_result = await _hommey._intention_agent.reply(context_msgs)
         intention_data = json.loads(intention_result.content)
 
         # 构建 agent_schedule（确保包含行程规划）
@@ -148,7 +148,7 @@ async def plan_trip(
 
         # 调度执行
 
-        orch_result = await _aligo._orchestrator.reply(
+        orch_result = await _hommey._orchestrator.reply(
             Msg(name="intention", content=json.dumps(intention_data, ensure_ascii=False), role="assistant")
         )
         result_data = json.loads(orch_result.content)
@@ -176,12 +176,12 @@ async def query_travel_policy(question: str) -> str:
     Args:
         question: 要查询的问题，如"北京的住宿标准是多少"、"差旅报销流程是什么"
     """
-    await _aligo.initialize()
+    await _hommey.initialize()
 
     try:
         from agentscope.message import Msg
 
-        rag_agent = _aligo._agent_registry["rag_knowledge"]
+        rag_agent = _hommey._agent_registry["rag_knowledge"]
         result = await rag_agent.reply(
             [Msg(name="user", content=question, role="user")]
         )
@@ -203,12 +203,12 @@ async def get_weather(city: str) -> str:
     Args:
         city: 城市名称，如"北京"、"上海"
     """
-    await _aligo.initialize()
+    await _hommey.initialize()
 
     try:
         from agentscope.message import Msg
 
-        info_agent = _aligo._agent_registry["information_query"]
+        info_agent = _hommey._agent_registry["information_query"]
         result = await info_agent.reply(
             [Msg(name="user", content=f"{city}天气", role="user")]
         )
@@ -230,12 +230,12 @@ async def search_web(query: str) -> str:
     Args:
         query: 搜索关键词，如"北京故宫开放时间"、"上海到北京高铁"
     """
-    await _aligo.initialize()
+    await _hommey.initialize()
 
     try:
         from agentscope.message import Msg
 
-        info_agent = _aligo._agent_registry["information_query"]
+        info_agent = _hommey._agent_registry["information_query"]
         result = await info_agent.reply(
             [Msg(name="user", content=f"搜索 {query}", role="user")]
         )
@@ -254,10 +254,10 @@ async def get_user_preferences() -> str:
     """
     查询当前用户的出行偏好设置，包括常用航司、酒店品牌、座位偏好等。
     """
-    await _aligo.initialize()
+    await _hommey.initialize()
 
     try:
-        prefs = _aligo._memory_manager.long_term.get_preference()
+        prefs = _hommey._memory_manager.long_term.get_preference()
         if not prefs:
             return "暂无偏好设置"
         return json.dumps(prefs, ensure_ascii=False, indent=2)
@@ -275,12 +275,12 @@ async def save_preference(key: str, value: str) -> str:
         key: 偏好类型，如"hotel_brands"、"airlines"、"seat_preference"、"home_location"
         value: 偏好值，如"汉庭,如家"、"东航"、"靠窗"、"上海"
     """
-    await _aligo.initialize()
+    await _hommey.initialize()
 
     try:
-        current = _aligo._memory_manager.long_term.get_preference()
+        current = _hommey._memory_manager.long_term.get_preference()
         current[key] = value
-        _aligo._memory_manager.long_term.save_preference(key, value)
+        _hommey._memory_manager.long_term.save_preference(key, value)
         return f"已保存偏好: {key} = {value}"
     except Exception as e:
         logger.error(f"偏好保存失败: {e}")
@@ -295,10 +295,10 @@ async def get_trip_history(limit: int = 5) -> str:
     Args:
         limit: 返回记录数量，默认5条
     """
-    await _aligo.initialize()
+    await _hommey.initialize()
 
     try:
-        trips = _aligo._memory_manager.long_term.get_trip_history(limit)
+        trips = _hommey._memory_manager.long_term.get_trip_history(limit)
         if not trips:
             return "暂无历史行程记录"
         return json.dumps(trips, ensure_ascii=False, indent=2)

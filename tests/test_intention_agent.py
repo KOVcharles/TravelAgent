@@ -14,7 +14,7 @@ import json
 import pytest
 
 pytestmark = pytest.mark.skipif(
-    os.getenv("ALIGO_RUN_LLM_TESTS", "").lower() not in {"1", "true", "yes"},
+    os.getenv("HOMMEY_RUN_LLM_TESTS", "").lower() not in {"1", "true", "yes"},
     reason="LLM integration tests are disabled by default",
 )
 

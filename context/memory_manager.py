@@ -42,7 +42,7 @@ class MemoryManager:
             redis_port=memory_conf.get("redis_port", 6379),
             redis_db=memory_conf.get("redis_db", 0),
             redis_password=memory_conf.get("redis_password"),
-            key_prefix=memory_conf.get("redis_key_prefix", "aligo:short_term"),
+            key_prefix=memory_conf.get("redis_key_prefix", "hommey:short_term"),
             backend=memory_conf.get("backend", "memory"),
         )
         long_term_conf = MEMORY_CONFIG.get("long_term", {})

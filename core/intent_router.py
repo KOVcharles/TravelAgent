@@ -34,6 +34,11 @@ class FastIntentRouter:
     """Cheap high-confidence router for common user requests."""
 
     CHITCHAT = {"你好", "您好", "hi", "hello", "hey", "谢谢", "感谢", "再见", "bye", "ok", "好的"}
+    CHITCHAT_KEYWORDS = (
+        "你好", "您好", "嗨", "哈喽", "在吗",
+        "你是什么", "你是谁", "你叫什么", "你能做什么", "你会什么", "介绍一下",
+        "谢谢", "感谢", "再见",
+    )
     POLICY_KEYWORDS = (
         "标准", "报销", "差旅政策", "住宿标准", "补贴", "流程",
         "餐补", "餐费", "餐饮", "饭补", "补助", "津贴",
@@ -52,7 +57,7 @@ class FastIntentRouter:
         if not q:
             return None
 
-        if q_lower in cls.CHITCHAT or q in cls.CHITCHAT:
+        if q_lower in cls.CHITCHAT or q in cls.CHITCHAT or any(keyword in q for keyword in cls.CHITCHAT_KEYWORDS):
             return cls._single("chitchat", "chitchat", 0.99, "明确的寒暄或社交对话")
 
         if any(keyword in q for keyword in cls.MEMORY_KEYWORDS):

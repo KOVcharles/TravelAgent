@@ -1,0 +1,50 @@
+# Python 虚拟环境
+venv/
+.venv/
+env/
+.env/
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# Python 缓存
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 记忆数据（由 volume 管理）
+data/memory/*.json
+
+# RAG 向量数据（本地开发产物）
+data/rag_knowledge/
+
+# 模型文件（太大，通常挂载 volume 或用模型服务）
+data/models/
+
+# AgentScope 运行时
+.agentscope/
+.agents/
+
+# 文档
+docs/
+
+# 测试
+tests/
+benchmark.py
+
+# 环境配置（敏感信息，通过 docker-compose env_file 注入）
+.env
+
+# 系统文件
+Thumbs.db
+*.log
