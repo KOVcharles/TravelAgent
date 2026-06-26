@@ -25,7 +25,7 @@ class DocumentParser(ABC):
 
 
 class TxtParser(DocumentParser):
-    supported_file_types = ("txt",)
+    supported_file_types = ("txt", "md")
 
     def parse(self, document: RawDocument) -> List[ParsedDocument]:
         text = document.content.decode("utf-8").strip()

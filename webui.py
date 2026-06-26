@@ -20,6 +20,7 @@ import gradio as gr
 from agents.intention_agent import IntentionAgent
 from agents.lazy_agent_registry import LazyAgentRegistry
 from agents.orchestration_agent import OrchestrationAgent
+from core.intent_catalog import INTENT_DISPLAY_NAMES
 from settings import LLM_CONFIG, SYSTEM_CONFIG, RESILIENCE_CONFIG
 from config_agentscope import init_agentscope
 from context.memory_manager import MemoryManager
@@ -144,16 +145,8 @@ h1 {
 }
 """
 
-# ── 智能体显示名称映射 ────────────────────────────────────
-AGENT_DISPLAY_NAMES = {
-    "event_collection": "事项收集",
-    "preference": "偏好管理",
-    "itinerary_planning": "行程规划",
-    "information_query": "信息查询",
-    "rag_knowledge": "知识库查询",
-    "memory_query": "记忆查询",
-    "chitchat": "闲聊",
-}
+# ── 智能体显示名称映射（统一来源：core.intent_catalog）────────────────────────────────────
+AGENT_DISPLAY_NAMES = INTENT_DISPLAY_NAMES
 
 
 class WebHommey:
@@ -350,6 +343,10 @@ class WebHommey:
 
         # 兜底：无智能体调度时走闲聊
         if result_data.get("status") == "no_agents" and not result_data.get("results"):
+            if result_data.get("message"):
+                response = result_data["message"]
+                self.memory_manager.add_message("assistant", response)
+                return response
             response = await self._handle_chitchat(user_input)
             self.memory_manager.add_message("assistant", response)
             return response

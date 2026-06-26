@@ -23,18 +23,12 @@ from utils.circuit_breaker import CircuitBreaker, CircuitOpenError
 from utils.llm_resilience import retry_with_backoff
 from core.onboarding import InitialPreferenceOnboarding
 from core.intent_router import FastIntentRouter
+from core.intent_catalog import INTENT_DISPLAY_NAMES
 
 logger = logging.getLogger(__name__)
 
-AGENT_DISPLAY_NAMES = {
-    "event_collection": "事项收集",
-    "preference": "偏好管理",
-    "itinerary_planning": "行程规划",
-    "information_query": "信息查询",
-    "rag_knowledge": "知识库查询",
-    "memory_query": "记忆查询",
-    "chitchat": "闲聊",
-}
+# 智能体显示名称（统一来源：core.intent_catalog）
+AGENT_DISPLAY_NAMES = INTENT_DISPLAY_NAMES
 
 
 class HommeyWebInstance:
@@ -278,6 +272,10 @@ class HommeyWebInstance:
 
         # 4. Chitchat fallback
         if result_data.get("status") == "no_agents" and not result_data.get("results"):
+            if result_data.get("message"):
+                response = result_data["message"]
+                self.memory_manager.add_message("assistant", response)
+                return {"response": response, "agents": [], "preferences_updated": False}
             response = await self._handle_chitchat(message)
             self.memory_manager.add_message("assistant", response)
             return {"response": response, "agents": [], "preferences_updated": False}

@@ -28,6 +28,9 @@ class FileSystemDocumentLoader(DocumentLoader):
 
         documents: List[RawDocument] = []
         for file_path in sorted(item for item in root.rglob("*") if item.is_file()):
+            file_type = file_path.suffix.lower().lstrip(".")
+            if file_type not in self.supported_file_types:
+                continue
             documents.append(self._load_file(file_path))
         return documents
 

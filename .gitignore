@@ -40,16 +40,24 @@ wheels/
 # AgentScope
 .agentscope/
 .agents/
+.claude/*.local.json
+.claude/claudian-settings.json
 
 # Local configuration and secrets
 .env
 .env.*
 !.env.example
-config.py
-config.local.py
+/config.py
+/config.local.py
 
 # Data
-data/rag_knowledge/
+data/documents/*
+!data/documents/.gitkeep
+!data/documents/README.md
+!data/documents/example_*.txt
+data/rag_knowledge/*
+!data/rag_knowledge/.gitkeep
+!data/rag_knowledge/README.md
 data/rag_scratch/
 .claude/skills/*/data/rag_knowledge/
 .claude/skills/*/data/documents/
@@ -58,8 +66,11 @@ data/preferences/*.json
 data/memory/*.json
 data/memory/**/*.json
 !data/memory/.gitkeep
+!data/memory/README.md
 data/memory_test/
-data/models/
+data/models/*
+!data/models/.gitkeep
+!data/models/README.md
 *.db
 *.sqlite
 *.sqlite3

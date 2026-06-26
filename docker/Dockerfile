@@ -1,9 +1,24 @@
 FROM python:3.10-slim
 
+ARG APT_MIRROR=http://mirrors.tuna.tsinghua.edu.cn/debian
+ARG APT_SECURITY_MIRROR=http://mirrors.tuna.tsinghua.edu.cn/debian-security
+
 WORKDIR /app
 
 # ── 系统依赖：curl(健康检查) + libgomp1(torch运行时) + libpq5(psycopg) ──
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN set -eux; \
+    if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
+        sed -i \
+            -e "s|http://deb.debian.org/debian|${APT_MIRROR}|g" \
+            -e "s|http://deb.debian.org/debian-security|${APT_SECURITY_MIRROR}|g" \
+            /etc/apt/sources.list.d/debian.sources; \
+    else \
+        sed -i \
+            -e "s|http://deb.debian.org/debian|${APT_MIRROR}|g" \
+            -e "s|http://deb.debian.org/debian-security|${APT_SECURITY_MIRROR}|g" \
+            /etc/apt/sources.list; \
+    fi; \
+    apt-get update && apt-get install -y --no-install-recommends \
     curl \
     libgomp1 \
     libpq5 \

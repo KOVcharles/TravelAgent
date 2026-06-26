@@ -33,6 +33,7 @@ from utils.circuit_breaker import CircuitOpenError
 from utils.llm_resilience import retry_with_backoff, run_health_check as check_llm_health
 from hommey_mcp.mcp_manager import MCPManager
 from hommey_mcp.mcp_config import MCPConfig
+from core.intent_catalog import INTENT_DISPLAY_NAMES
 from core.intent_router import FastIntentRouter
 from core.onboarding import InitialPreferenceOnboarding, detect_city_from_ip
 # 移除其他智能体的导入，改用懒加载
@@ -362,7 +363,8 @@ class HommeyCLI:
             # 情况1: 没有任何智能体被调用
             status = result_data.get("status", "unknown")
             if status == "no_agents":
-                self.console.print("✓ 好的，我已记录下来。", style="green")
+                message = result_data.get("message")
+                self.console.print(message or "✓ 好的，我已记录下来。", style="green")
                 self.console.print("\n💡 您可以继续补充信息，或者尝试：", style="dim")
                 self.console.print("  • 规划行程：「帮我规划去北京的行程」", style="dim")
                 self.console.print("  • 查询信息：「北京的天气怎么样」", style="dim")
@@ -743,18 +745,8 @@ class HommeyCLI:
         return has_output
 
     def _get_agent_display_name(self, agent_name: str) -> str:
-        """获取智能体的显示名称"""
-        agent_display_names = {
-            "event_collection": "事项收集",
-            "preference": "偏好管理",
-            "itinerary_planning": "行程规划",
-            "information_query": "信息查询",
-            "rag_knowledge": "知识库查询",
-            "memory_query": "记忆查询",
-            "mcp_tool": "MCP 工具",
-            "chitchat": "闲聊",
-        }
-        return agent_display_names.get(agent_name, agent_name)
+        """获取智能体的显示名称（统一来源：core.intent_catalog）"""
+        return INTENT_DISPLAY_NAMES.get(agent_name, agent_name)
 
     def show_status(self):
         """显示当前状态"""

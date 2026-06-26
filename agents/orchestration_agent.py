@@ -92,6 +92,20 @@ class OrchestrationAgent(AgentBase):
                 role="assistant"
             )
 
+        routing = intention_data.get("routing") or {}
+        if routing.get("should_call_skill") is False:
+            return Msg(
+                name=self.name,
+                content=json.dumps({
+                    "status": "no_agents",
+                    "routing": routing,
+                    "message": intention_data.get("clarification")
+                    or self._message_for_non_skill_intent(routing.get("intent")),
+                    "results": [],
+                }, ensure_ascii=False),
+                role="assistant",
+            )
+
         # 获取智能体调度计划
         agent_schedule = intention_data.get("agent_schedule", [])
         if not agent_schedule:
@@ -406,6 +420,11 @@ class OrchestrationAgent(AgentBase):
             aggregated["errors"] = len(errors)
 
         return aggregated
+
+    def _message_for_non_skill_intent(self, intent: str) -> str:
+        if intent == "unsupported":
+            return "这个请求我目前不支持。可以帮你处理差旅政策、行程规划或旅行信息查询。"
+        return "我还不太确定你的意思。你可以再明确一下要查政策、规划行程，还是查询某个旅行信息吗？"
 
     def _update_memory(self, intention_data: Dict[str, Any], results: List[Dict]):
         """

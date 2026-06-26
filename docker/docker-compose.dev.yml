@@ -1,0 +1,11 @@
+services:
+  hommey:
+    volumes:
+      - ..:/app
+      - /app/.venv
+      - /app/venv
+      - /app/env
+      - /app/node_modules
+      - ../data/documents:/app/data/documents:ro
+      - ../data/models:/app/data/models:ro
+      - ../data/rag_knowledge:/app/data/rag_knowledge

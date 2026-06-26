@@ -4,6 +4,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
+from core.intent_guard import (
+    GuardResult,
+    can_call_information_query,
+    guard_user_input,
+    passes_confidence_gate,
+)
+from core.intent_catalog import CHITCHAT_EXACT, CHITCHAT_KEYWORDS
+
 
 @dataclass(frozen=True)
 class IntentRoute:
@@ -12,9 +20,16 @@ class IntentRoute:
     confidence: float
     reason: str
     key_entities: Dict[str, Any]
+    should_call_skill: bool = True
 
     def to_intention_data(self, user_query: str) -> Dict[str, Any]:
         return {
+            "routing": {
+                "intent": self.intent_type,
+                "confidence": self.confidence,
+                "reason": self.reason,
+                "should_call_skill": self.should_call_skill,
+            },
             "reasoning": f"Fast intent router: {self.reason}",
             "intents": [
                 {
@@ -22,23 +37,18 @@ class IntentRoute:
                     "confidence": self.confidence,
                     "description": self.reason,
                     "reason": self.reason,
+                    "should_call_skill": self.should_call_skill,
                 }
             ],
             "key_entities": self.key_entities,
             "rewritten_query": user_query,
-            "agent_schedule": self.agent_schedule,
+            "agent_schedule": self.agent_schedule if self.should_call_skill else [],
         }
 
 
 class FastIntentRouter:
     """Cheap high-confidence router for common user requests."""
 
-    CHITCHAT = {"你好", "您好", "hi", "hello", "hey", "谢谢", "感谢", "再见", "bye", "ok", "好的"}
-    CHITCHAT_KEYWORDS = (
-        "你好", "您好", "嗨", "哈喽", "在吗",
-        "你是什么", "你是谁", "你叫什么", "你能做什么", "你会什么", "介绍一下",
-        "谢谢", "感谢", "再见",
-    )
     POLICY_KEYWORDS = (
         "标准", "报销", "差旅政策", "住宿标准", "补贴", "流程",
         "餐补", "餐费", "餐饮", "饭补", "补助", "津贴",
@@ -48,7 +58,7 @@ class FastIntentRouter:
     SEARCH_KEYWORDS = ("查一下", "搜索", "查询", "了解一下")
     MEMORY_KEYWORDS = ("我去过", "我的历史", "我之前", "上次", "我的偏好", "我喜欢去哪")
     PREFERENCE_KEYWORDS = ("我喜欢", "我常坐", "我常住", "我住在", "我家在", "我偏好", "我习惯", "我不喜欢")
-    TRIP_KEYWORDS = ("我要去", "我想去", "帮我规划", "规划行程", "安排行程", "从")
+    TRIP_KEYWORDS = ("我要去", "我想去", "帮我规划", "帮我安排", "规划行程", "安排行程", "从")
 
     @classmethod
     def route(cls, user_query: str) -> Optional[IntentRoute]:
@@ -57,7 +67,11 @@ class FastIntentRouter:
         if not q:
             return None
 
-        if q_lower in cls.CHITCHAT or q in cls.CHITCHAT or any(keyword in q for keyword in cls.CHITCHAT_KEYWORDS):
+        guard_result = guard_user_input(q)
+        if guard_result:
+            return cls._from_guard_result(guard_result)
+
+        if q_lower in CHITCHAT_EXACT or q in CHITCHAT_EXACT or any(keyword in q for keyword in CHITCHAT_KEYWORDS):
             return cls._single("chitchat", "chitchat", 0.99, "明确的寒暄或社交对话")
 
         if any(keyword in q for keyword in cls.MEMORY_KEYWORDS):
@@ -70,7 +84,8 @@ class FastIntentRouter:
             return cls._single("rag_knowledge", "rag_knowledge", 0.88, "查询差旅制度、标准或报销政策")
 
         if any(keyword in q for keyword in cls.WEATHER_KEYWORDS):
-            return cls._single("information_query", "information_query", 0.9, "查询天气或实时信息")
+            info_guard = can_call_information_query(q, 0.9)
+            return cls._from_guard_result(info_guard)
 
         if cls._looks_like_trip_request(q):
             return IntentRoute(
@@ -95,7 +110,8 @@ class FastIntentRouter:
             )
 
         if any(keyword in q for keyword in cls.SEARCH_KEYWORDS):
-            return cls._single("information_query", "information_query", 0.82, "明确的信息查询或搜索请求")
+            info_guard = can_call_information_query(q, 0.82)
+            return cls._from_guard_result(info_guard)
 
         return None
 
@@ -114,6 +130,17 @@ class FastIntentRouter:
                     "expected_output": "完成用户请求",
                 }
             ],
+        )
+
+    @classmethod
+    def _from_guard_result(cls, result: GuardResult) -> IntentRoute:
+        return IntentRoute(
+            intent_type=result.intent,
+            confidence=result.confidence,
+            reason=result.reason,
+            key_entities={},
+            agent_schedule=result.agent_schedule,
+            should_call_skill=result.should_call_skill and passes_confidence_gate(result.intent, result.confidence),
         )
 
     @classmethod

@@ -1,0 +1,12 @@
+{
+  "userName": "",
+  "enableBlocklist": true,
+  "blockedCommands": {
+    "unix": ["rm -rf", "chmod 777", "chmod -R 777"],
+    "windows": ["format", "diskpart"]
+  },
+  "permissionMode": "default",
+  "model": "",
+  "environmentVariables": "",
+  "allowedExportPaths": ["~/Desktop", "~/Downloads"]
+}

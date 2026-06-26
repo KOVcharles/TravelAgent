@@ -1,0 +1,7 @@
+# Example travel policy
+
+This is sanitized sample content for local RAG testing.
+
+- Domestic meal allowance example: follow the policy configured by your company.
+- Hotel standard example: choose a compliant hotel tier for the destination city.
+- Reimbursement example: keep invoices and submit them through the internal platform.

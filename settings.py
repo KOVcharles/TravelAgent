@@ -31,6 +31,16 @@ def _float_env(name: str, default: float) -> float:
     return float(value)
 
 
+def _optional_env(name: str):
+    value = os.getenv(name)
+    if value is None:
+        return None
+    value = value.strip()
+    if not value or value.startswith("#"):
+        return None
+    return value
+
+
 LLM_CONFIG = {
     "api_key": os.getenv("HOMMEY_API_KEY", ""),
     "model_name": os.getenv("HOMMEY_MODEL_NAME", "deepseek-v3"),
@@ -102,7 +112,7 @@ MEMORY_CONFIG = {
         "redis_host": os.getenv("HOMMEY_REDIS_HOST", "127.0.0.1"),
         "redis_port": _int_env("HOMMEY_REDIS_PORT", 6379),
         "redis_db": _int_env("HOMMEY_REDIS_DB", 0),
-        "redis_password": os.getenv("HOMMEY_REDIS_PASSWORD") or None,
+        "redis_password": _optional_env("HOMMEY_REDIS_PASSWORD"),
         "redis_key_prefix": os.getenv("HOMMEY_REDIS_KEY_PREFIX", "hommey:short_term"),
     },
     "long_term": {
