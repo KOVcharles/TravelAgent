@@ -1,3 +1,20 @@
+# ============================================================
+# docker-compose.dev.yml —— 开发覆盖文件（override）
+# ------------------------------------------------------------
+# ⚠️ 本文件不是独立可运行的 compose 文件！它只给 hommey 服务追加
+#    “把源码挂载进容器”的 volumes，没有 build/image/ports/environment
+#    （这些都在 base 文件 docker-compose.yml 里）。单独运行它会报：
+#    service "hommey" has neither an image nor a build context specified
+#
+# ✅ 必须和 base 文件「合并」使用（顺序：先 base，再 dev）：
+#    docker compose -f docker/docker-compose.yml -f docker/docker-compose.dev.yml up -d
+#
+#    改完代码无需 rebuild，只需重启进程（dev 模式已挂载源码）：
+#    docker compose -f docker/docker-compose.yml -f docker/docker-compose.dev.yml restart hommey
+#
+# Windows 注意：第一行 ..:/app 会把整个仓库挂进容器，需在 Docker Desktop
+#               Settings → Resources → File sharing 里放行该盘符。
+# ============================================================
 services:
   hommey:
     volumes:

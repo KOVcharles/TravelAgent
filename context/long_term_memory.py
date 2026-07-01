@@ -472,25 +472,32 @@ class PostgresLongTermMemory:
                     trip_info.get("purpose"),
                 ),
             )
-            cur.execute(
-                """
-                UPDATE user_statistics
-                SET
-                    total_trips = total_trips + 1,
-                    frequent_destinations = CASE
-                        WHEN %s IS NULL OR %s = '' THEN frequent_destinations
-                        ELSE jsonb_set(
+            if destination:
+                cur.execute(
+                    """
+                    UPDATE user_statistics
+                    SET
+                        total_trips = total_trips + 1,
+                        frequent_destinations = jsonb_set(
                             frequent_destinations,
                             ARRAY[%s],
                             to_jsonb(COALESCE((frequent_destinations ->> %s)::int, 0) + 1),
                             true
-                        )
-                    END,
-                    updated_at = NOW()
-                WHERE user_id = %s;
-                """,
-                (destination, destination, destination, destination, self.user_id),
-            )
+                        ),
+                        updated_at = NOW()
+                    WHERE user_id = %s;
+                    """,
+                    (destination, destination, self.user_id),
+                )
+            else:
+                cur.execute(
+                    """
+                    UPDATE user_statistics
+                    SET total_trips = total_trips + 1, updated_at = NOW()
+                    WHERE user_id = %s;
+                    """,
+                    (self.user_id,),
+                )
         logger.info(f"Saved trip history: {trip_id}")
 
     def get_trip_history(self, limit: int = 10) -> List[Dict[str, Any]]:
@@ -606,4 +613,3 @@ class PostgresLongTermMemory:
 
 
 LongTermMemory = PostgresLongTermMemory
-

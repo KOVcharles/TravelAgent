@@ -4,6 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
+from core.schedule_builder import build_agent_schedule
 from core.intent_guard import (
     GuardResult,
     can_call_information_query,
@@ -11,6 +12,14 @@ from core.intent_guard import (
     passes_confidence_gate,
 )
 from core.intent_catalog import CHITCHAT_EXACT, CHITCHAT_KEYWORDS
+
+
+@dataclass(frozen=True)
+class IntentCandidate:
+    type: str
+    confidence: float
+    reason: str
+    source: str = "rule"
 
 
 @dataclass(frozen=True)
@@ -74,46 +83,69 @@ class FastIntentRouter:
         if q_lower in CHITCHAT_EXACT or q in CHITCHAT_EXACT or any(keyword in q for keyword in CHITCHAT_KEYWORDS):
             return cls._single("chitchat", "chitchat", 0.99, "明确的寒暄或社交对话")
 
-        if any(keyword in q for keyword in cls.MEMORY_KEYWORDS):
-            return cls._single("memory_query", "memory_query", 0.9, "询问用户自己的历史或偏好记忆")
-
-        if any(keyword in q for keyword in cls.PREFERENCE_KEYWORDS):
-            return cls._single("preference", "preference", 0.9, "表达或更新用户偏好")
-
-        if any(keyword in q for keyword in cls.POLICY_KEYWORDS):
-            return cls._single("rag_knowledge", "rag_knowledge", 0.88, "查询差旅制度、标准或报销政策")
-
-        if any(keyword in q for keyword in cls.WEATHER_KEYWORDS):
-            info_guard = can_call_information_query(q, 0.9)
-            return cls._from_guard_result(info_guard)
-
-        if cls._looks_like_trip_request(q):
+        candidates = cls.detect(q)
+        if candidates:
+            intents = [
+                {
+                    "type": candidate.type,
+                    "confidence": candidate.confidence,
+                    "description": candidate.reason,
+                    "reason": candidate.reason,
+                    "should_call_skill": passes_confidence_gate(candidate.type, candidate.confidence),
+                }
+                for candidate in candidates
+            ]
+            callable_intents = [item for item in intents if item["should_call_skill"]]
+            primary = callable_intents[0] if callable_intents else intents[0]
             return IntentRoute(
-                intent_type="itinerary_planning",
-                confidence=0.88,
-                reason="明确的行程规划或出行意图",
+                intent_type=primary["type"],
+                confidence=primary["confidence"],
+                reason=primary["reason"],
                 key_entities={},
-                agent_schedule=[
-                    {
-                        "agent_name": "event_collection",
-                        "priority": 1,
-                        "reason": "收集行程基础信息",
-                        "expected_output": "出发地、目的地、日期、行程目的和缺失信息",
-                    },
-                    {
-                        "agent_name": "itinerary_planning",
-                        "priority": 2,
-                        "reason": "基于收集信息生成行程规划",
-                        "expected_output": "结构化行程计划",
-                    },
-                ],
+                agent_schedule=build_agent_schedule(callable_intents),
+                should_call_skill=bool(callable_intents),
             )
 
-        if any(keyword in q for keyword in cls.SEARCH_KEYWORDS):
-            info_guard = can_call_information_query(q, 0.82)
-            return cls._from_guard_result(info_guard)
-
         return None
+
+    @classmethod
+    def detect(cls, user_query: str) -> List[IntentCandidate]:
+        """Collect rule-based business intent candidates without first-match exit."""
+        q = (user_query or "").strip()
+        if not q:
+            return []
+
+        candidates: List[IntentCandidate] = []
+
+        has_policy = any(keyword in q for keyword in cls.POLICY_KEYWORDS)
+        has_weather = any(keyword in q for keyword in cls.WEATHER_KEYWORDS)
+        has_search = any(keyword in q for keyword in cls.SEARCH_KEYWORDS)
+
+        if any(keyword in q for keyword in cls.MEMORY_KEYWORDS):
+            candidates.append(IntentCandidate("memory_query", 0.9, "询问用户自己的历史或偏好记忆"))
+
+        if any(keyword in q for keyword in cls.PREFERENCE_KEYWORDS):
+            candidates.append(IntentCandidate("preference", 0.9, "表达或更新用户偏好"))
+
+        if has_policy:
+            candidates.append(IntentCandidate("rag_knowledge", 0.88, "查询差旅制度、标准或报销政策"))
+
+        if has_weather:
+            info_guard = can_call_information_query(q, 0.9)
+            if info_guard.intent == "information_query" and info_guard.should_call_skill:
+                candidates.append(IntentCandidate("information_query", info_guard.confidence, info_guard.reason))
+
+        if cls._looks_like_trip_request(q):
+            candidates.append(IntentCandidate("itinerary_planning", 0.88, "明确的行程规划或出行意图"))
+
+        # Generic search verbs like “查一下” should not turn policy/RAG queries
+        # such as “查一下出差补贴” into an external information_query.
+        if has_search and not has_policy:
+            info_guard = can_call_information_query(q, 0.82)
+            if info_guard.intent == "information_query" and info_guard.should_call_skill:
+                candidates.append(IntentCandidate("information_query", info_guard.confidence, info_guard.reason))
+
+        return cls._dedupe_candidates(candidates)
 
     @classmethod
     def _single(cls, intent_type: str, agent_name: str, confidence: float, reason: str) -> IntentRoute:
@@ -142,6 +174,19 @@ class FastIntentRouter:
             agent_schedule=result.agent_schedule,
             should_call_skill=result.should_call_skill and passes_confidence_gate(result.intent, result.confidence),
         )
+
+    @classmethod
+    def _dedupe_candidates(cls, candidates: List[IntentCandidate]) -> List[IntentCandidate]:
+        by_type: Dict[str, IntentCandidate] = {}
+        order: List[str] = []
+        for candidate in candidates:
+            existing = by_type.get(candidate.type)
+            if existing is None:
+                by_type[candidate.type] = candidate
+                order.append(candidate.type)
+            elif candidate.confidence > existing.confidence:
+                by_type[candidate.type] = candidate
+        return [by_type[intent_type] for intent_type in order]
 
     @classmethod
     def _looks_like_trip_request(cls, query: str) -> bool:

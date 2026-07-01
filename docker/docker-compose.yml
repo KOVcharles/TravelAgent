@@ -52,6 +52,8 @@ services:
   postgres:
     image: postgres:16-alpine
     container_name: hommey-postgres
+    ports:
+      - "5432:5432"
     environment:
       POSTGRES_USER: hommey
       POSTGRES_PASSWORD: ${PG_PASSWORD:-hommey123}

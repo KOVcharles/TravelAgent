@@ -3,260 +3,309 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Hommey 商旅助手</title>
-    <script src="https://cdn.tailwindcss.com"></script>
+    <title>Hommey</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
+        :root {
+            --ink: #26211c;
+            --muted: #776f66;
+            --paper: #fffaf2;
+            --cream: #f8f2e8;
+            --orange: #c65f24;
+            --orange-deep: #974515;
+            --line: rgba(43, 36, 28, 0.12);
+            --dark: #25211d;
+            --shadow: 0 24px 80px rgba(54, 42, 28, 0.12);
+        }
+
+        * { box-sizing: border-box; }
+        html, body { min-height: 100%; }
         body {
-            font-family: 'DM Sans', 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-            background: #0B1120;
+            margin: 0;
             min-height: 100vh;
+            overflow: hidden;
+            font-family: "Inter", "Noto Sans SC", -apple-system, BlinkMacSystemFont, sans-serif;
+            color: var(--ink);
+            background:
+                linear-gradient(rgba(38,33,28,0.032) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(38,33,28,0.032) 1px, transparent 1px),
+                radial-gradient(circle at 50% 46%, rgba(255,250,242,0.9), transparent 42%),
+                linear-gradient(140deg, #fff9f0 0%, #f6ede1 56%, #fff5eb 100%);
+            background-size: 64px 64px, 64px 64px, auto, auto;
+        }
+
+        .page {
+            position: relative;
+            min-height: 100vh;
+            display: grid;
+            grid-template-rows: auto 1fr;
+        }
+
+        .nav {
+            position: relative;
+            z-index: 2;
+            height: 78px;
+            padding: 22px clamp(20px, 4vw, 54px);
             display: flex;
             align-items: center;
+            justify-content: flex-end;
+        }
+
+        .brand {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            color: var(--ink);
+            font-size: 14px;
+            font-weight: 800;
+            text-decoration: none;
+        }
+
+        .brand img {
+            width: 34px;
+            height: 34px;
+            border-radius: 9px;
+            object-fit: cover;
+            box-shadow: 0 10px 24px rgba(54, 42, 28, 0.1);
+        }
+
+        .hero {
+            position: relative;
+            z-index: 1;
+            width: min(980px, calc(100vw - 36px));
+            margin: 0 auto;
+            min-height: calc(100vh - 78px);
+            padding: 34px 0 70px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
             justify-content: center;
-            position: relative;
-            overflow: hidden;
+            text-align: center;
         }
-        /* Animated gradient background */
-        body::before {
-            content: '';
-            position: absolute;
-            top: -50%;
-            left: -50%;
-            width: 200%;
-            height: 200%;
-            background: radial-gradient(ellipse at 30% 20%, rgba(59,130,246,0.08) 0%, transparent 50%),
-                        radial-gradient(ellipse at 70% 80%, rgba(99,102,241,0.06) 0%, transparent 50%);
-            animation: bgShift 20s ease-in-out infinite;
-            pointer-events: none;
+
+        .kicker {
+            color: var(--orange-deep);
+            font-size: 11px;
+            font-weight: 800;
+            letter-spacing: 0.14em;
+            text-transform: uppercase;
         }
-        @keyframes bgShift {
-            0%, 100% { transform: translate(0, 0); }
-            33% { transform: translate(2%, -2%); }
-            66% { transform: translate(-2%, 1%); }
+
+        h1 {
+            max-width: 780px;
+            margin: 18px 0 0;
+            font-size: clamp(48px, 8vw, 104px);
+            line-height: 0.94;
+            letter-spacing: 0;
+            font-weight: 800;
         }
-        /* Grid pattern overlay */
-        .grid-pattern {
-            position: absolute;
-            inset: 0;
-            background-image: linear-gradient(rgba(59,130,246,0.03) 1px, transparent 1px),
-                              linear-gradient(90deg, rgba(59,130,246,0.03) 1px, transparent 1px);
-            background-size: 48px 48px;
-            pointer-events: none;
+
+        .sub {
+            max-width: 580px;
+            margin: 24px 0 0;
+            color: var(--muted);
+            font-size: 16px;
+            line-height: 1.9;
         }
-        /* Glowing dot decoration */
-        .glow-dot {
-            position: absolute;
-            border-radius: 50%;
-            filter: blur(80px);
-            pointer-events: none;
+
+        .typing {
+            min-height: 48px;
+            margin-top: 32px;
+            padding: 12px 17px;
+            border-radius: 999px;
+            background: rgba(255,255,255,0.74);
+            border: 1px solid var(--line);
+            color: #4c453d;
+            font-size: 14px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            max-width: min(620px, 100%);
+            box-shadow: 0 12px 34px rgba(54,42,28,0.07);
         }
-        /* Login card */
-        .login-card {
-            background: linear-gradient(135deg, rgba(30,41,59,0.9), rgba(15,23,42,0.95));
-            backdrop-filter: blur(24px);
-            -webkit-backdrop-filter: blur(24px);
-            border: 1px solid rgba(51,65,85,0.6);
-            border-radius: 24px;
-            padding: 48px 40px;
-            width: 100%;
-            max-width: 420px;
-            position: relative;
-            z-index: 10;
-            box-shadow: 0 25px 60px rgba(0,0,0,0.5), 0 0 0 1px rgba(59,130,246,0.05);
-            transition: box-shadow 0.4s ease;
+
+        .typing::after {
+            content: "";
+            width: 1px;
+            height: 18px;
+            margin-left: 3px;
+            background: var(--orange);
+            animation: blink 0.8s step-end infinite;
         }
-        .login-card:hover {
-            box-shadow: 0 30px 70px rgba(0,0,0,0.6), 0 0 0 1px rgba(59,130,246,0.1);
+
+        @keyframes blink { 50% { opacity: 0; } }
+
+        .login-form {
+            width: min(520px, 100%);
+            margin-top: 28px;
+            padding: 7px;
+            display: grid;
+            grid-template-columns: 1fr auto;
+            gap: 7px;
+            border-radius: 999px;
+            background: rgba(255,255,255,0.82);
+            border: 1px solid rgba(255,255,255,0.76);
+            box-shadow: var(--shadow);
+            backdrop-filter: blur(14px);
         }
-        /* Brand gradient text */
-        .brand-gradient {
-            background: linear-gradient(135deg, #F1F5F9 0%, #94A3B8 100%);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
-        }
-        /* Input styling */
+
         .input-field {
-            width: 100%;
-            padding: 14px 18px;
-            background: rgba(15,23,42,0.6);
-            border: 1px solid rgba(51,65,85,0.6);
-            border-radius: 12px;
-            color: #F1F5F9;
-            font-size: 16px;
-            font-family: inherit;
-            outline: none;
-            transition: all 0.25s ease;
+            min-width: 0;
+            min-height: 48px;
+            padding: 0 18px;
+            border: 0;
+            outline: 0;
+            border-radius: 999px;
+            background: transparent;
+            color: var(--ink);
+            font: inherit;
+            font-size: 15px;
         }
-        .input-field::placeholder {
-            color: #475569;
-        }
-        .input-field:focus {
-            border-color: #3B82F6;
-            box-shadow: 0 0 0 3px rgba(59,130,246,0.15), 0 0 20px rgba(59,130,246,0.05);
-            background: rgba(15,23,42,0.8);
-        }
-        .input-field.error {
-            border-color: #EF4444;
-            box-shadow: 0 0 0 3px rgba(239,68,68,0.1);
-        }
-        /* Submit button */
+
+        .input-field::placeholder { color: #a89c91; }
+
         .submit-btn {
-            width: 100%;
-            padding: 14px;
-            border: none;
-            border-radius: 12px;
-            background: linear-gradient(135deg, #3B82F6, #2563EB);
-            color: white;
-            font-size: 16px;
-            font-weight: 600;
-            font-family: inherit;
+            min-width: 142px;
+            min-height: 48px;
+            padding: 0 22px;
+            border: 0;
+            border-radius: 999px;
+            background: var(--dark);
+            color: #fff8ef;
+            font: inherit;
+            font-size: 14px;
+            font-weight: 800;
             cursor: pointer;
-            transition: all 0.25s ease;
-            position: relative;
-            overflow: hidden;
+            transition: transform 0.18s ease, box-shadow 0.18s ease, opacity 0.18s ease;
         }
+
         .submit-btn:hover {
             transform: translateY(-1px);
-            box-shadow: 0 8px 30px rgba(59,130,246,0.3);
+            box-shadow: 0 18px 40px rgba(37,33,29,0.18);
         }
-        .submit-btn:active {
-            transform: translateY(0);
-        }
+
         .submit-btn:disabled {
-            opacity: 0.6;
-            cursor: not-allowed;
+            cursor: wait;
+            opacity: 0.72;
             transform: none;
         }
-        /* Loading spinner */
+
         .spinner {
             display: inline-block;
-            width: 18px;
-            height: 18px;
-            border: 2px solid rgba(255,255,255,0.3);
-            border-top-color: white;
-            border-radius: 50%;
-            animation: spin 0.6s linear infinite;
-            vertical-align: middle;
+            width: 15px;
+            height: 15px;
             margin-right: 8px;
+            border: 2px solid rgba(255,255,255,0.35);
+            border-top-color: #fff8ef;
+            border-radius: 999px;
+            vertical-align: -3px;
+            animation: spin 0.75s linear infinite;
         }
+
         @keyframes spin { to { transform: rotate(360deg); } }
-        /* Error message */
+
         .error-msg {
-            color: #FCA5A5;
+            min-height: 22px;
+            margin-top: 12px;
+            color: #a7473e;
             font-size: 13px;
-            margin-top: 8px;
-            display: none;
-            align-items: center;
-            gap: 6px;
+            visibility: hidden;
         }
-        .error-msg.visible { display: flex; }
-        /* Entrance animation */
-        .animate-in {
-            animation: fadeSlideUp 0.6s ease forwards;
-            opacity: 0;
-        }
-        @keyframes fadeSlideUp {
-            from { opacity: 0; transform: translateY(16px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-        .delay-1 { animation-delay: 0.1s; }
-        .delay-2 { animation-delay: 0.2s; }
-        .delay-3 { animation-delay: 0.3s; }
-        .delay-4 { animation-delay: 0.4s; }
-        /* Shimmer effect */
-        .shimmer {
-            background: linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.03) 50%, rgba(255,255,255,0) 100%);
-            background-size: 200% 100%;
-            animation: shimmer 3s ease-in-out infinite;
-            border-radius: 24px;
-            position: absolute;
-            inset: 0;
+
+        .error-msg.visible { visibility: visible; }
+
+        .route-line {
+            position: fixed;
+            left: 7vw;
+            right: 7vw;
+            bottom: 9vh;
+            height: 130px;
+            opacity: 0.48;
             pointer-events: none;
         }
-        @keyframes shimmer {
-            0% { background-position: -200% 0; }
-            100% { background-position: 200% 0; }
+
+        .route-line svg {
+            width: 100%;
+            height: 100%;
         }
-        /* Keyboard shortcut hint */
-        .kbd {
-            display: inline-block;
-            padding: 2px 6px;
-            font-size: 11px;
-            font-weight: 500;
-            color: #64748B;
-            background: rgba(51,65,85,0.4);
-            border-radius: 4px;
-            border: 1px solid rgba(51,65,85,0.5);
+
+        .corner-note {
+            position: fixed;
+            left: clamp(20px, 4vw, 54px);
+            bottom: 28px;
+            color: #9d9489;
+            font-size: 12px;
+            letter-spacing: 0.02em;
+        }
+
+        @media (max-width: 700px) {
+            body { overflow: auto; }
+            .nav {
+                height: 68px;
+                justify-content: center;
+                padding: 18px 20px;
+            }
+            .hero {
+                min-height: calc(100vh - 68px);
+                padding: 26px 0 52px;
+            }
+            .login-form {
+                grid-template-columns: 1fr;
+                border-radius: 24px;
+                padding: 8px;
+            }
+            .input-field {
+                text-align: center;
+                background: #fffaf2;
+            }
+            .submit-btn { width: 100%; }
+            .route-line, .corner-note { display: none; }
         }
     </style>
 </head>
 <body>
-    <div class="grid-pattern"></div>
+    <main class="page">
+        <nav class="nav" aria-label="Hommey">
+            <a class="brand" href="/" aria-label="Hommey 首页">
+                <img src="/static/assets/hommey-avatar.jpg" alt="">
+                <span>Hommey</span>
+            </a>
+        </nav>
 
-    <!-- Glowing decorations -->
-    <div class="glow-dot" style="width:400px;height:400px;background:rgba(59,130,246,0.08);top:-100px;right:-100px;"></div>
-    <div class="glow-dot" style="width:300px;height:300px;background:rgba(99,102,241,0.06);bottom:-50px;left:-50px;"></div>
+        <section class="hero">
+            <div class="kicker">Travel intelligence</div>
+            <h1>出差前，先问 Hommey。</h1>
+            <p class="sub">说出目的地、时间和问题。Hommey 会把行程、差旅标准和你的偏好整理成更稳妥的建议。</p>
 
-    <!-- Login Card -->
-    <div class="login-card animate-in delay-1">
-        <div class="shimmer"></div>
+            <div
+                id="typingText"
+                class="typing"
+                data-phrases="今天我要去上海出差，补贴标准是怎么样？|下周去深圳，两天一晚怎么安排更稳妥？|帮我查一下北京到杭州的高铁和住宿标准。|明早 9 点到虹桥，几点出门比较稳妥？|这次可以订一等座吗？帮我看一下差旅规则。|会议在静安寺附近，酒店选哪里更合适？|帮我把三天两晚的行程整理成可执行计划。|如果航班延误，帮我准备一个备选路线。"
+            ></div>
 
-        <!-- Logo & Brand -->
-        <div style="text-align: center; margin-bottom: 36px;">
-            <div style="display: inline-flex; align-items: center; justify-content: center; width: 56px; height: 56px; border-radius: 16px; background: linear-gradient(135deg, #3B82F6, #6366F1); margin-bottom: 16px; box-shadow: 0 8px 24px rgba(59,130,246,0.25);">
-                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>
-                </svg>
+            <form id="loginForm" class="login-form" autocomplete="off">
+                <input id="userId" class="input-field" type="text" placeholder="输入用户 ID" autocomplete="off" spellcheck="false" autofocus>
+                <button id="submitBtn" class="submit-btn" type="submit">
+                    <span id="btnText">进入 Hommey</span>
+                    <span id="btnLoading" style="display:none;"><span class="spinner"></span>正在进入</span>
+                </button>
+            </form>
+            <div id="errorMsg" class="error-msg">
+                <span id="errorText">请输入有效的用户 ID</span>
             </div>
-            <h1 style="font-size: 26px; font-weight: 700; color: #F1F5F9; letter-spacing: -0.5px; margin-bottom: 4px;">Hommey</h1>
-            <p style="color: #64748B; font-size: 14px; font-weight: 400;">智能差旅助手 · 让差旅更简单</p>
+        </section>
+
+        <div class="route-line" aria-hidden="true">
+            <svg viewBox="0 0 920 130" fill="none">
+                <path d="M18 96 C 188 18, 320 120, 496 46 S 696 78, 902 24" stroke="#c65f24" stroke-width="2" stroke-dasharray="7 10"/>
+                <circle cx="18" cy="96" r="5" fill="#c65f24"/>
+                <circle cx="902" cy="24" r="5" fill="#c65f24"/>
+            </svg>
         </div>
-
-        <!-- Input Form -->
-        <form id="loginForm" autocomplete="off" style="margin-bottom: 24px;">
-            <div style="margin-bottom: 4px;">
-                <label for="userId" style="display: block; font-size: 13px; font-weight: 500; color: #94A3B8; margin-bottom: 8px;">
-                    用户 ID
-                </label>
-                <input
-                    id="userId"
-                    class="input-field"
-                    type="text"
-                    placeholder="请输入您的用户 ID，如 zhangsan"
-                    autocomplete="off"
-                    spellcheck="false"
-                    autofocus
-                >
-                <div id="errorMsg" class="error-msg">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-                    <span id="errorText">请输入有效的用户 ID</span>
-                </div>
-            </div>
-
-            <button id="submitBtn" class="submit-btn" type="submit" style="margin-top: 20px;">
-                <span id="btnText">进入系统</span>
-                <span id="btnLoading" style="display:none;">
-                    <span class="spinner"></span>
-                    正在为您准备...
-                </span>
-            </button>
-        </form>
-
-        <!-- Footer hints -->
-        <div style="text-align: center;">
-            <p style="color: #475569; font-size: 13px; margin-bottom: 8px;">
-                新用户将自动创建专属配置
-            </p>
-            <p style="color: #334155; font-size: 12px;">
-                按 <span class="kbd">↵</span> Enter 快速进入
-            </p>
-        </div>
-    </div>
+        <div class="corner-note">Private business travel assistant</div>
+    </main>
 
     <script>
         const form = document.getElementById('loginForm');
@@ -266,79 +315,89 @@
         const btnLoading = document.getElementById('btnLoading');
         const errorMsg = document.getElementById('errorMsg');
         const errorText = document.getElementById('errorText');
+        const typingText = document.getElementById('typingText');
 
-        function showError(msg) {
-            errorText.textContent = msg;
+        function showError(message) {
+            errorText.textContent = message;
             errorMsg.classList.add('visible');
-            input.classList.add('error');
+            input.focus();
         }
 
-        function hideError() {
+        function clearError() {
             errorMsg.classList.remove('visible');
-            input.classList.remove('error');
         }
 
         function setLoading(loading) {
-            if (loading) {
-                btnText.style.display = 'none';
-                btnLoading.style.display = 'inline';
-                submitBtn.disabled = true;
-            } else {
-                btnText.style.display = 'inline';
-                btnLoading.style.display = 'none';
-                submitBtn.disabled = false;
-            }
+            submitBtn.disabled = loading;
+            btnText.style.display = loading ? 'none' : 'inline';
+            btnLoading.style.display = loading ? 'inline' : 'none';
         }
 
-        input.addEventListener('input', hideError);
-        input.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter') {
-                e.preventDefault();
-                submitBtn.click();
-            }
-        });
+        function startTyping() {
+            const phrases = typingText.dataset.phrases.split('|');
+            let phraseIndex = 0;
+            let charIndex = 0;
+            let deleting = false;
+            const typeSpeed = 76;
+            const eraseSpeed = 34;
+            const holdMs = 1900;
 
-        form.addEventListener('submit', async (e) => {
-            e.preventDefault();
-            hideError();
+            function tick() {
+                const phrase = phrases[phraseIndex];
+                charIndex += deleting ? -1 : 1;
+                typingText.textContent = phrase.slice(0, charIndex);
+
+                if (!deleting && charIndex === phrase.length) {
+                    deleting = true;
+                    setTimeout(tick, holdMs);
+                    return;
+                }
+                if (deleting && charIndex === 0) {
+                    deleting = false;
+                    phraseIndex = (phraseIndex + 1) % phrases.length;
+                    setTimeout(tick, 320);
+                    return;
+                }
+                setTimeout(tick, deleting ? eraseSpeed : typeSpeed);
+            }
+
+            tick();
+        }
+
+        input.addEventListener('input', clearError);
+
+        form.addEventListener('submit', async (event) => {
+            event.preventDefault();
+            clearError();
 
             const userId = input.value.trim();
             if (!userId) {
                 showError('请输入您的用户 ID');
-                input.focus();
                 return;
             }
 
             setLoading(true);
-
             try {
                 const res = await fetch('/login', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ user_id: userId }),
                 });
-
                 if (!res.ok) {
                     const err = await res.json();
                     showError(err.detail || '登录失败，请重试');
                     setLoading(false);
                     return;
                 }
-
                 const data = await res.json();
-                // Smooth transition to chat page
-                document.querySelector('.login-card').style.transition = 'all 0.3s ease';
-                document.querySelector('.login-card').style.opacity = '0';
-                document.querySelector('.login-card').style.transform = 'translateY(-10px) scale(0.98)';
-
-                setTimeout(() => {
-                    window.location.href = data.redirect;
-                }, 300);
+                window.location.href = data.redirect;
             } catch (err) {
                 showError('网络错误，请检查连接后重试');
                 setLoading(false);
             }
         });
+
+        startTyping();
     </script>
 </body>
 </html>

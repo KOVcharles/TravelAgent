@@ -14,6 +14,7 @@ import logging
 import re
 import sys
 import os
+from urllib.parse import quote
 
 # Add project root to sys.path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../..")))
@@ -157,22 +158,23 @@ class InformationQueryAgent(AgentBase):
                 "results": {"message": "未识别到城市，请说明具体城市，如：杭州下周的天气怎么样？"},
             }
 
-        url = f"https://wttr.in/{city}?format=j1"
+        url = f"https://wttr.in/{quote(city)}?format=j1"
         try:
             loop = asyncio.get_event_loop()
             resp = await loop.run_in_executor(
                 None,
-                lambda: httpx.get(url, timeout=10.0, headers={"User-Agent": "curl/7.64.1"}),
+                lambda: httpx.get(
+                    url,
+                    timeout=10.0,
+                    follow_redirects=True,
+                    headers={"User-Agent": "Hommey/1.0 (+https://wttr.in)"},
+                ),
             )
             resp.raise_for_status()
             data = resp.json()
         except Exception as e:
-            logger.warning(f"wttr.in request failed: {e}")
-            return {
-                "query_type": "天气查询",
-                "query_success": False,
-                "results": {"message": f"天气接口暂时不可用: {e}", "sources": [{"url": "https://wttr.in", "title": "wttr.in"}]},
-            }
+            logger.warning(f"wttr.in request failed, trying Open-Meteo fallback: {e}")
+            return await self._open_meteo_weather_query(city, httpx)
 
         try:
             current = data.get("current_condition", [{}])[0]
@@ -206,6 +208,170 @@ class InformationQueryAgent(AgentBase):
                 "query_success": False,
                 "results": {"message": "天气数据解析失败", "sources": [{"url": "https://wttr.in", "title": "wttr.in"}]},
             }
+
+    async def _open_meteo_weather_query(self, city: str, httpx_module) -> Dict[str, Any]:
+        """使用 Open-Meteo 作为天气备用接口（无需 API Key）。"""
+        import asyncio
+
+        city_coords = self._city_coordinates(city)
+        if not city_coords:
+            return {
+                "query_type": "天气查询",
+                "query_success": False,
+                "results": {
+                    "message": f"天气接口暂时不可用，且未内置「{city}」的经纬度。请稍后重试或换一个常见城市名。",
+                    "sources": [
+                        {"url": "https://wttr.in", "title": "wttr.in"},
+                        {"url": "https://open-meteo.com", "title": "Open-Meteo"},
+                    ],
+                },
+            }
+
+        latitude, longitude = city_coords
+        params = {
+            "latitude": latitude,
+            "longitude": longitude,
+            "current": "temperature_2m,relative_humidity_2m,weather_code",
+            "daily": "weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max",
+            "timezone": "Asia/Shanghai",
+            "forecast_days": 4,
+        }
+
+        try:
+            loop = asyncio.get_event_loop()
+            resp = await loop.run_in_executor(
+                None,
+                lambda: httpx_module.get(
+                    "https://api.open-meteo.com/v1/forecast",
+                    params=params,
+                    timeout=10.0,
+                    follow_redirects=True,
+                    headers={"User-Agent": "Hommey/1.0"},
+                ),
+            )
+            resp.raise_for_status()
+            data = resp.json()
+        except Exception as e:
+            logger.warning(f"Open-Meteo request failed: {e}")
+            return {
+                "query_type": "天气查询",
+                "query_success": False,
+                "results": {
+                    "message": f"天气接口暂时不可用: {e}",
+                    "sources": [
+                        {"url": "https://wttr.in", "title": "wttr.in"},
+                        {"url": "https://open-meteo.com", "title": "Open-Meteo"},
+                    ],
+                },
+            }
+
+        current = data.get("current") or {}
+        temp_c = current.get("temperature_2m", "?")
+        humidity = current.get("relative_humidity_2m", "?")
+        desc = self._weather_code_text(current.get("weather_code"))
+        weather_text = f"{city}当前天气：{desc}，气温 {temp_c}°C，湿度 {humidity}%。"
+
+        daily = data.get("daily") or {}
+        dates = daily.get("time") or []
+        codes = daily.get("weather_code") or []
+        max_temps = daily.get("temperature_2m_max") or []
+        min_temps = daily.get("temperature_2m_min") or []
+        precip = daily.get("precipitation_probability_max") or []
+        forecasts = []
+        for idx, date in enumerate(dates[:3]):
+            day_desc = self._weather_code_text(codes[idx] if idx < len(codes) else None)
+            low = min_temps[idx] if idx < len(min_temps) else "?"
+            high = max_temps[idx] if idx < len(max_temps) else "?"
+            rain = precip[idx] if idx < len(precip) else None
+            rain_text = f"，最高降水概率 {rain}%" if rain is not None else ""
+            forecasts.append(f"{date}: {day_desc}，{low}~{high}°C{rain_text}")
+        if forecasts:
+            weather_text += " 未来几日：" + "；".join(forecasts)
+
+        return {
+            "query_type": "天气查询",
+            "query_success": True,
+            "results": {
+                "summary": weather_text,
+                "sources": [{"url": "https://open-meteo.com", "title": "Open-Meteo"}],
+            },
+        }
+
+    def _city_coordinates(self, city: str) -> Optional[tuple]:
+        """常见城市经纬度，用于天气接口备用查询。"""
+        coords = {
+            "北京": (39.9042, 116.4074),
+            "上海": (31.2304, 121.4737),
+            "广州": (23.1291, 113.2644),
+            "深圳": (22.5431, 114.0579),
+            "杭州": (30.2741, 120.1551),
+            "南京": (32.0603, 118.7969),
+            "成都": (30.5728, 104.0668),
+            "武汉": (30.5928, 114.3055),
+            "西安": (34.3416, 108.9398),
+            "苏州": (31.2989, 120.5853),
+            "天津": (39.3434, 117.3616),
+            "重庆": (29.5630, 106.5516),
+            "厦门": (24.4798, 118.0894),
+            "青岛": (36.0671, 120.3826),
+            "大连": (38.9140, 121.6147),
+            "宁波": (29.8683, 121.5440),
+            "无锡": (31.4912, 120.3119),
+            "长沙": (28.2282, 112.9388),
+            "郑州": (34.7466, 113.6254),
+            "济南": (36.6512, 117.1201),
+            "哈尔滨": (45.8038, 126.5349),
+            "沈阳": (41.8057, 123.4315),
+            "昆明": (25.0389, 102.7183),
+            "合肥": (31.8206, 117.2272),
+            "福州": (26.0745, 119.2965),
+            "石家庄": (38.0428, 114.5149),
+            "南昌": (28.6820, 115.8582),
+            "贵阳": (26.6470, 106.6302),
+            "太原": (37.8706, 112.5489),
+            "南宁": (22.8170, 108.3669),
+        }
+        return coords.get(city)
+
+    def _weather_code_text(self, code: Any) -> str:
+        """Open-Meteo weather_code 简明中文描述。"""
+        if code is None:
+            return "—"
+        try:
+            code = int(code)
+        except (TypeError, ValueError):
+            return "—"
+        mapping = {
+            0: "晴",
+            1: "大部晴朗",
+            2: "局部多云",
+            3: "阴",
+            45: "雾",
+            48: "雾凇",
+            51: "小毛毛雨",
+            53: "毛毛雨",
+            55: "较强毛毛雨",
+            56: "冻毛毛雨",
+            57: "较强冻毛毛雨",
+            61: "小雨",
+            63: "中雨",
+            65: "大雨",
+            66: "冻雨",
+            67: "较强冻雨",
+            71: "小雪",
+            73: "中雪",
+            75: "大雪",
+            77: "雪粒",
+            80: "小阵雨",
+            81: "阵雨",
+            82: "强阵雨",
+            85: "小阵雪",
+            86: "强阵雪",
+            95: "雷暴",
+            96: "雷暴伴小冰雹",
+            99: "雷暴伴强冰雹",
+        }
+        return mapping.get(code, "天气变化")
 
     def _extract_city_from_query(self, query: str) -> str:
         """从问题中提取城市名（简单实现：常见城市列表匹配）。"""

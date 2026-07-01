@@ -21,6 +21,7 @@ import logging
 from core.intent_catalog import build_intent_prompt_section
 from core.intent_result import parse_json_object, validate_intent_result
 from core.intent_router import FastIntentRouter
+from core.schedule_builder import build_agent_schedule
 from core.intent_guard import (
     DEFAULT_CONFIDENCE_THRESHOLD,
     INFORMATION_QUERY_THRESHOLD,
@@ -76,12 +77,17 @@ class IntentionAgent(AgentBase):
 
         guard_result = guard_user_input(user_query)
         if guard_result:
-            result = guard_result.to_intention_data(user_query)
+            result = self._apply_routing_guard(guard_result.to_intention_data(user_query), user_query)
+            return Msg(name=self.name, content=json.dumps(result, ensure_ascii=False), role="assistant")
+
+        fast_candidates = FastIntentRouter.detect(user_query)
+        if fast_candidates:
+            result = self._result_from_candidates(fast_candidates, user_query)
             return Msg(name=self.name, content=json.dumps(result, ensure_ascii=False), role="assistant")
 
         fast_route = FastIntentRouter.route(user_query)
         if fast_route:
-            result = fast_route.to_intention_data(user_query)
+            result = self._apply_routing_guard(fast_route.to_intention_data(user_query), user_query)
             return Msg(name=self.name, content=json.dumps(result, ensure_ascii=False), role="assistant")
 
         # 构建上下文
@@ -217,35 +223,110 @@ class IntentionAgent(AgentBase):
     def _apply_routing_guard(self, result: dict, user_query: str) -> dict:
         routing = result.get("routing") or {}
         intents = result.get("intents") or []
-        primary = intents[0] if intents else {}
-        intent = routing.get("intent") or primary.get("type") or "unclear"
-        confidence = float(routing.get("confidence") or primary.get("confidence") or 0.0)
-        reason = routing.get("reason") or primary.get("reason") or result.get("reasoning", "")
+        if not intents:
+            intent = routing.get("intent") or "unclear"
+            confidence = float(routing.get("confidence") or 0.0)
+            reason = routing.get("reason") or result.get("reasoning", "")
+            intents = [
+                {
+                    "type": intent,
+                    "confidence": confidence,
+                    "description": reason,
+                    "reason": reason,
+                    "should_call_skill": False,
+                }
+            ]
 
-        if intent == "information_query":
-            info_guard = can_call_information_query(user_query, confidence)
-            if not info_guard.should_call_skill:
-                return info_guard.to_intention_data(user_query)
-
-        should_call_skill = passes_confidence_gate(intent, confidence)
-        if intent in {"unclear", "unsupported", "fallback"}:
-            should_call_skill = False
-
-        result["routing"] = {
-            "intent": intent,
-            "confidence": confidence,
-            "reason": reason,
-            "should_call_skill": should_call_skill,
-        }
-
+        callable_intents = []
         for item in intents:
-            item["should_call_skill"] = should_call_skill
+            intent_type = item.get("type") or "unclear"
+            confidence = float(item.get("confidence") or 0.0)
+            item["type"] = intent_type
+            item["confidence"] = confidence
+            item["should_call_skill"] = self._should_call_intent(user_query, intent_type, confidence)
+            if item["should_call_skill"]:
+                callable_intents.append(item)
 
-        if not should_call_skill:
-            result["agent_schedule"] = []
+        result["intents"] = intents
+        result["agent_schedule"] = build_agent_schedule(callable_intents)
+
+        if callable_intents:
+            primary = self._select_primary_intent(callable_intents)
+            result["routing"] = {
+                "intent": primary["type"],
+                "confidence": float(primary.get("confidence") or 0.0),
+                "reason": primary.get("reason") or routing.get("reason") or result.get("reasoning", ""),
+                "should_call_skill": True,
+                "mode": "multi" if len(callable_intents) > 1 else "single",
+                "primary_intent": primary["type"],
+            }
+        else:
+            summary_intent = routing.get("intent")
+            if summary_intent not in {"fallback", "unsupported"}:
+                summary_intent = "unclear"
+            result["routing"] = {
+                "intent": summary_intent,
+                "confidence": float(routing.get("confidence") or 0.0),
+                "reason": routing.get("reason") or result.get("reasoning", ""),
+                "should_call_skill": False,
+                "mode": "none",
+                "primary_intent": summary_intent,
+            }
             result.setdefault(
                 "clarification",
                 "我还不太确定你的意思。你可以再明确一下要查政策、规划行程，还是查询某个旅行信息吗？",
             )
 
         return result
+
+    def _result_from_candidates(self, candidates, user_query: str) -> dict:
+        intents = [
+            {
+                "type": candidate.type,
+                "confidence": candidate.confidence,
+                "description": candidate.reason,
+                "reason": candidate.reason,
+                "should_call_skill": False,
+            }
+            for candidate in candidates
+        ]
+        result = {
+            "routing": {
+                "intent": intents[0]["type"],
+                "confidence": intents[0]["confidence"],
+                "reason": intents[0]["reason"],
+                "should_call_skill": False,
+            },
+            "reasoning": "Fast intent router: collected candidate business intents",
+            "intents": intents,
+            "key_entities": {},
+            "rewritten_query": user_query,
+            "agent_schedule": [],
+        }
+        return self._apply_routing_guard(result, user_query)
+
+    def _select_primary_intent(self, callable_intents: List[dict]) -> dict:
+        """Pick the display primary intent without affecting the executable schedule."""
+        priority = {
+            "itinerary_planning": 0,
+            "information_query": 1,
+            "rag_knowledge": 2,
+            "preference": 3,
+            "memory_query": 4,
+            "event_collection": 5,
+            "chitchat": 6,
+        }
+        def sort_key(item: dict):
+            intent_type = item.get("type") or ""
+            confidence = float(item.get("confidence") or 0.0)
+            return (priority.get(intent_type, 99), -confidence)
+
+        return min(callable_intents, key=sort_key)
+
+    def _should_call_intent(self, user_query: str, intent_type: str, confidence: float) -> bool:
+        if intent_type in {"unclear", "unsupported", "fallback"}:
+            return False
+        if intent_type == "information_query":
+            info_guard = can_call_information_query(user_query, confidence)
+            return info_guard.intent == "information_query" and info_guard.should_call_skill
+        return passes_confidence_gate(intent_type, confidence)
