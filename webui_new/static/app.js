@@ -74,7 +74,7 @@
             const status = await fetchJson(`/api/${encodeURIComponent(userId)}/status`);
             if (!status.initialized) {
                 const initData = await fetchJson(`/api/${encodeURIComponent(userId)}/init`, { method: 'POST' });
-                if (!initData.success) throw new Error(initData.error || '初始化失败');
+                if (!initData.success) throw createApiError(initData, '初始化失败');
             }
 
             await loadUserSummary();
@@ -242,7 +242,7 @@
             });
             removeProcessingIndicator();
             if (data.error || data.success === false) {
-                addMessage('ai', data.error || '偏好保存失败，请再试一次。');
+                addMessage('ai', getErrorMessage(data, '偏好保存失败，请再试一次。'));
                 return;
             }
             addMessage('ai', data.message || `我记住了：${value}`);
@@ -298,7 +298,7 @@
 
             if (!res.ok) {
                 const err = await res.json();
-                throw new Error(err.error || '请求失败，请重试');
+                throw createApiError(err, '请求失败，请重试', res.status);
             }
             if (!res.body) throw new Error('当前浏览器不支持流式响应');
 
@@ -319,7 +319,7 @@
                 for (const line of lines) {
                     const event = parseStreamLine(line);
                     if (!event) continue;
-                    if (event.type === 'error') throw new Error(event.error || '处理失败，请重试');
+                    if (event.type === 'error') throw createApiError(event, '处理失败，请重试');
                     if (event.type === 'agents') updateAgentTags(event.agents);
                     if (event.type === 'chunk') {
                         if (!streamMsg) {
@@ -354,7 +354,7 @@
             if (preferencesUpdated) await loadUserSummary();
         } catch (err) {
             removeProcessingIndicator();
-            addMessage('ai', err.message || '网络错误，请检查连接后重试。');
+            addMessage('ai', formatDisplayError(err, '网络错误，请检查连接后重试。'));
         } finally {
             isProcessing = false;
             sendBtn.disabled = false;
@@ -523,8 +523,51 @@
     async function fetchJson(url, options) {
         const res = await fetch(url, options);
         const data = await res.json();
-        if (!res.ok) throw new Error(data.detail || data.error || '请求失败');
+        if (!res.ok) throw createApiError(data, '请求失败', res.status);
         return data;
+    }
+
+    class ApiError extends Error {
+        constructor(status, code, message, requestId, retryable) {
+            super(message);
+            this.name = 'ApiError';
+            this.status = status || 0;
+            this.code = code || '';
+            this.requestId = requestId || '';
+            this.retryable = !!retryable;
+        }
+    }
+
+    function createApiError(data, fallback, status) {
+        const payload = getErrorPayload(data);
+        return new ApiError(
+            status || (data && data.status),
+            payload && payload.code,
+            getErrorMessage(data, fallback),
+            payload && (payload.request_id || payload.requestId),
+            payload && payload.retryable
+        );
+    }
+
+    function getErrorPayload(data) {
+        if (!data) return null;
+        if (data.error && typeof data.error === 'object') return data.error;
+        return data;
+    }
+
+    function getErrorMessage(data, fallback) {
+        if (!data) return fallback;
+        const payload = getErrorPayload(data);
+        if (payload && payload.message) return payload.message;
+        if (typeof data.error === 'string') return data.error;
+        if (data.detail) return data.detail;
+        if (data.message) return data.message;
+        return fallback;
+    }
+
+    function formatDisplayError(error, fallback) {
+        const message = (error && error.message) || fallback;
+        return error && error.requestId ? `${message}\n错误编号：${error.requestId}` : message;
     }
 
     function escapeHTML(value) {

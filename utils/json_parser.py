@@ -6,7 +6,13 @@ import json
 import re
 import logging
 
+from utils.logging_safety import sanitize_for_log
+
 logger = logging.getLogger(__name__)
+
+
+def _preview(value, limit=500):
+    return sanitize_for_log(value, limit=limit)
 
 
 def robust_json_parse(text: str, fallback=None) -> dict:
@@ -153,7 +159,7 @@ def robust_json_parse(text: str, fallback=None) -> dict:
         logger.warning(f"JSON5 parse failed: {e}")
 
     # 所有尝试都失败
-    logger.error(f"All JSON parsing attempts failed. Full JSON:\n{json_str}")
+    logger.error("All JSON parsing attempts failed. JSON preview: %s", _preview(json_str))
 
     if fallback is not None:
         logger.warning("Using fallback value")

@@ -21,6 +21,9 @@ from context.memory_manager import MemoryManager
 from runtime import create_agent_runtime, create_circuit_breaker
 from utils.circuit_breaker import CircuitBreaker, CircuitOpenError
 from utils.llm_resilience import retry_with_backoff
+from utils.logging_safety import sanitize_for_log
+from utils.observability import COMPONENT_LLM, ERROR_CIRCUIT_OPEN, record_upstream_error
+from webui_new.core.errors import BusinessError, InternalError, UpstreamError
 from core.onboarding import InitialPreferenceOnboarding
 from core.intent_router import FastIntentRouter
 from core.intent_catalog import INTENT_DISPLAY_NAMES
@@ -82,8 +85,8 @@ class HommeyWebInstance:
 
             self.initialized = True
         except Exception as e:
-            self.init_error = str(e)
-            logger.error(f"Init failed for user {self.user_id}: {e}")
+            self.init_error = "初始化失败，请稍后刷新页面重试"
+            logger.error("Init failed for user %s: %s", self.user_id, sanitize_for_log(e))
             raise
 
     async def get_preferences(self) -> dict:
@@ -128,7 +131,7 @@ class HommeyWebInstance:
     async def save_onboarding_preference(self, key: str, value: str) -> dict:
         """Save one first-run preference without using the chat pipeline."""
         if not self.memory_manager:
-            return {"success": False, "error": "系统未初始化"}
+            raise BusinessError("NOT_INITIALIZED", "系统未初始化，请刷新页面")
         return self.onboarding.save_answer(self.memory_manager, key, value)
 
     async def get_user_summary(self) -> dict:
@@ -183,7 +186,7 @@ class HommeyWebInstance:
         timings = {}
 
         if not self.initialized:
-            return {"error": "系统未初始化"}
+            raise BusinessError("NOT_INITIALIZED", "系统未初始化，请刷新页面")
 
         # ═══ 优化 1: 简单闲聊直接处理，不经过 LLM ═══
         if self._is_simple_chitchat(message):
@@ -230,17 +233,30 @@ class HommeyWebInstance:
                 if self.circuit_breaker:
                     self.circuit_breaker.record_success()
             except CircuitOpenError:
-                return {"error": "服务暂时不可用，请稍后再试。"}
+                record_upstream_error(COMPONENT_LLM, ERROR_CIRCUIT_OPEN, retryable=True)
+                raise UpstreamError("CIRCUIT_OPEN", "服务暂时不可用，请稍后再试。", retryable=True, component=COMPONENT_LLM)
             except Exception as e:
                 if self.circuit_breaker:
                     self.circuit_breaker.record_failure()
-                logger.error(f"Intention agent failed: {e}")
-                return {"error": f"处理请求时出错: {e}"}
+                logger.error("Intention agent failed: %s", sanitize_for_log(e))
+                record_upstream_error(COMPONENT_LLM, e, retryable=True)
+                raise UpstreamError(
+                    "INTENTION_FAILED",
+                    "处理请求时出错，请稍后重试。",
+                    retryable=True,
+                    component=COMPONENT_LLM,
+                    debug_message=str(e),
+                )
 
         try:
             intention_data = json.loads(intention_result.content)
         except json.JSONDecodeError:
-            return {"error": "抱歉，我没能理解您的意思，请换一种说法试试？"}
+            raise UpstreamError(
+                "INTENTION_PARSE_FAILED",
+                "抱歉，我没能理解您的意思，请换一种说法试试？",
+                retryable=False,
+                component=COMPONENT_LLM,
+            )
 
         self._total_messages += 1
         self.memory_manager.add_message("user", message)
@@ -258,17 +274,26 @@ class HommeyWebInstance:
             if self.circuit_breaker:
                 self.circuit_breaker.record_success()
         except CircuitOpenError:
-            return {"error": "服务暂时不可用，请稍后再试。"}
+            record_upstream_error(COMPONENT_LLM, ERROR_CIRCUIT_OPEN, retryable=True)
+            raise UpstreamError("CIRCUIT_OPEN", "服务暂时不可用，请稍后再试。", retryable=True, component=COMPONENT_LLM)
         except Exception as e:
             if self.circuit_breaker:
                 self.circuit_breaker.record_failure()
-            logger.error(f"Orchestration failed: {e}")
-            return {"error": f"调度执行失败: {e}"}
+            logger.error("Orchestration failed: %s", sanitize_for_log(e))
+            record_upstream_error(COMPONENT_LLM, e, retryable=True)
+            raise UpstreamError(
+                "ORCHESTRATION_FAILED",
+                "调度执行失败，请稍后重试。",
+                retryable=True,
+                component=COMPONENT_LLM,
+                debug_message=str(e),
+            )
 
         try:
             result_data = json.loads(orchestration_result.content)
         except json.JSONDecodeError:
-            result_data = {"error": "解析结果失败"}
+            raise InternalError("ORCHESTRATION_PARSE_FAILED", "解析结果失败，请稍后重试")
+        self._raise_on_agent_errors(result_data)
 
         # 4. Chitchat fallback
         if result_data.get("status") == "no_agents" and not result_data.get("results"):
@@ -313,13 +338,55 @@ class HommeyWebInstance:
             "timings": {key: round(value, 3) for key, value in timings.items()},
         }
 
+    def _raise_on_agent_errors(self, result_data: dict) -> None:
+        """Convert internal agent error payloads into the public AppError flow."""
+        errors = []
+        for result in result_data.get("results", []):
+            agent_name = result.get("agent_name", "unknown")
+            status = result.get("status")
+            data = result.get("data") if isinstance(result.get("data"), dict) else {}
+            message = result.get("message") or data.get("error") or data.get("message")
+
+            if status == "error":
+                errors.append((agent_name, message or "agent returned error status"))
+                continue
+
+            if status == "success" and data.get("error") and not self._has_agent_success_payload(agent_name, data):
+                errors.append((agent_name, data.get("error")))
+
+        if not errors:
+            return
+
+        agent_name, debug_message = errors[0]
+        logger.error(
+            "Agent result failed user_id=%s agent=%s error=%s",
+            self.user_id,
+            agent_name,
+            sanitize_for_log(debug_message),
+        )
+        record_upstream_error(COMPONENT_LLM, str(debug_message), retryable=True)
+        raise UpstreamError(
+            "AGENT_EXECUTION_FAILED",
+            "处理失败，请稍后重试。",
+            retryable=True,
+            component=COMPONENT_LLM,
+            debug_message=f"{agent_name}: {debug_message}",
+        )
+
+    @staticmethod
+    def _has_agent_success_payload(agent_name: str, data: dict) -> bool:
+        """Best-effort guard for legacy agents that may include non-fatal error fields."""
+        if agent_name == "information_query":
+            results = data.get("results") if isinstance(data.get("results"), dict) else data
+            return bool(results.get("summary") or results.get("message"))
+        if agent_name == "rag_knowledge":
+            return bool(data.get("answer") or data.get("content") or data.get("data", {}).get("answer"))
+        return any(data.get(key) for key in ("answer", "content", "result", "message", "summary", "itinerary", "preferences"))
+
     async def stream_message(self, message: str):
         """Yield JSON-serializable progress and response events for Web streaming."""
         yield {"type": "status", "message": "processing"}
         result = await self.process_message(message)
-        if result.get("error"):
-            yield {"type": "error", "error": result["error"]}
-            return
 
         agents = result.get("agents", [])
         if agents:

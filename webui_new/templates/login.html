@@ -385,7 +385,7 @@
                 });
                 if (!res.ok) {
                     const err = await res.json();
-                    showError(err.detail || '登录失败，请重试');
+                    showError(err.error?.message || err.error || err.detail || '登录失败，请重试');
                     setLoading(false);
                     return;
                 }

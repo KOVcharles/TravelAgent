@@ -1,251 +1,79 @@
 """
-Hommey 商旅助手 - FastAPI Web 服务
-提供聊天 API 和页面路由
+Hommey 商旅助手 - FastAPI Web 服务入口
+
+这个文件只负责组装 Web 应用：
+- 创建 FastAPI app
+- 挂载静态资源和模板渲染器
+- 创建共享的 WebHommeyManager
+- 注册 middleware、exception handler 和各个 router
+
+具体 API 逻辑放在 webui_new/routes/，请求模型放在 webui_new/schemas/，
+错误响应和 request_id 逻辑放在 webui_new/core/。
 """
-import json
-import logging
 import os
 import sys
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+from fastapi import FastAPI
+from fastapi.responses import HTMLResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from jinja2 import Environment, FileSystemLoader
-from pydantic import BaseModel
 
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, project_root)
 
-logger = logging.getLogger(__name__)
+from settings import SYSTEM_CONFIG
+from utils.observability import render_metrics
+from utils.preflight import run_preflight
+from utils.structured_logging import configure_logging
+from webui_new.core.errors import register_error_handlers
+from webui_new.manager import WebHommeyManager
+from webui_new.routes.auth import create_auth_router
+from webui_new.routes.chat import create_chat_router
+from webui_new.routes.onboarding import create_onboarding_router
+from webui_new.routes.pages import create_pages_router
+from webui_new.routes.users import create_users_router
 
-# ── FastAPI 应用 ──────────────────────────────────────────
+
+configure_logging()
+
 app = FastAPI(title="Hommey 商旅助手", version="2.0.0")
+manager = WebHommeyManager()
 
-# ── 静态文件 & 模板 ──────────────────────────────────────
 static_dir = os.path.join(os.path.dirname(__file__), "static")
 templates_dir = os.path.join(os.path.dirname(__file__), "templates")
 os.makedirs(static_dir, exist_ok=True)
 os.makedirs(templates_dir, exist_ok=True)
 
 app.mount("/static", StaticFiles(directory=static_dir), name="static")
-jinja_env = Environment(
-    loader=FileSystemLoader(templates_dir),
-    enable_async=False,
-)
+jinja_env = Environment(loader=FileSystemLoader(templates_dir), enable_async=False)
 
 
 def _render(template_name: str, **context) -> HTMLResponse:
-    """Render a Jinja2 template and return HTMLResponse."""
+    """渲染 templates/ 下的页面，供 pages router 注入使用。"""
     template = jinja_env.get_template(template_name)
-    html = template.render(**context)
-    return HTMLResponse(html)
-
-# ── 管理器 ────────────────────────────────────────────────
-from webui_new.manager import WebHommeyManager
-
-manager = WebHommeyManager()
+    return HTMLResponse(template.render(**context))
 
 
-# ── 数据模型 ──────────────────────────────────────────────
-class LoginRequest(BaseModel):
-    user_id: str
+# 注册顺序保持简单：先全局错误处理，再挂载功能路由。
+register_error_handlers(app)
+app.include_router(create_pages_router(_render))
+app.include_router(create_auth_router())
+app.include_router(create_users_router(manager))
+app.include_router(create_onboarding_router(manager))
+app.include_router(create_chat_router(manager))
 
 
-class ChatRequest(BaseModel):
-    message: str
+@app.get("/healthz")
+async def healthz():
+    return {"ok": True}
 
 
-class OnboardingPreferenceRequest(BaseModel):
-    key: str
-    value: str
+@app.get("/readyz")
+async def readyz():
+    include_network = bool(SYSTEM_CONFIG.get("preflight_include_network", False))
+    return await run_preflight(include_network=include_network)
 
 
-# ── 页面路由 ──────────────────────────────────────────────
-
-@app.get("/", response_class=HTMLResponse)
-async def login_page():
-    """登录页"""
-    return _render("login.html")
-
-
-@app.post("/login")
-async def login(data: LoginRequest):
-    """提交用户 ID"""
-    user_id = data.user_id.strip()
-    if not user_id:
-        raise HTTPException(status_code=400, detail="请输入用户 ID")
-    return {"redirect": f"/chat/{user_id}"}
-
-
-@app.get("/chat/{user_id}", response_class=HTMLResponse)
-async def chat_page(user_id: str):
-    """聊天主页面"""
-    return _render("chat.html", user_id=user_id)
-
-
-# ── API 路由 ──────────────────────────────────────────────
-
-@app.post("/api/{user_id}/init")
-async def initialize_user(user_id: str):
-    """初始化用户实例"""
-    try:
-        instance = await manager.initialize_user(user_id)
-        return {
-            "success": True,
-            "initialized": instance.initialized,
-        }
-    except Exception as e:
-        logger.error(f"Init failed for {user_id}: {e}")
-        return JSONResponse(
-            status_code=500,
-            content={"success": False, "error": str(e)},
-        )
-
-
-@app.get("/api/{user_id}/status")
-async def get_status(user_id: str):
-    """获取用户实例状态"""
-    return manager.get_status(user_id)
-
-
-@app.get("/api/{user_id}/is-new")
-async def is_new_user(user_id: str):
-    """检查是否为新用户"""
-    instance = manager.get(user_id)
-    if not instance or not instance.initialized:
-        return {"is_new": True}
-    try:
-        is_new = await instance.is_new_user()
-        return {"is_new": is_new}
-    except Exception:
-        return {"is_new": True}
-
-
-@app.get("/api/{user_id}/onboarding")
-async def get_onboarding_state(user_id: str):
-    """获取新用户初始化偏好进度"""
-    instance = manager.get(user_id)
-    if not instance or not instance.initialized:
-        return {"is_new": True, "completed": False, "missing_keys": []}
-    try:
-        return await instance.get_onboarding_state()
-    except Exception as e:
-        logger.error(f"Onboarding state failed for {user_id}: {e}")
-        return {"is_new": True, "completed": False, "missing_keys": []}
-
-
-@app.post("/api/{user_id}/onboarding/preference")
-async def save_onboarding_preference(user_id: str, data: OnboardingPreferenceRequest):
-    """保存新用户初始化偏好，不经过普通聊天链路"""
-    instance = manager.get(user_id)
-    if not instance or not instance.initialized:
-        return JSONResponse(
-            status_code=400,
-            content={"success": False, "error": "系统未初始化，请刷新页面"},
-        )
-    try:
-        return await instance.save_onboarding_preference(data.key, data.value)
-    except ValueError as e:
-        return JSONResponse(
-            status_code=400,
-            content={"success": False, "error": str(e)},
-        )
-    except Exception as e:
-        logger.error(f"Onboarding preference failed for {user_id}: {e}")
-        return JSONResponse(
-            status_code=500,
-            content={"success": False, "error": f"保存初始化偏好失败: {str(e)}"},
-        )
-
-
-@app.get("/api/{user_id}/summary")
-async def get_user_summary(user_id: str):
-    """获取用户摘要信息（右侧面板）"""
-    instance = manager.get(user_id)
-    if not instance or not instance.initialized:
-        return {
-            "user_id": user_id,
-            "name_display": user_id,
-            "preferences": [],
-            "member_level": "",
-            "member_tag": "",
-            "initialized": False,
-        }
-    try:
-        summary = await instance.get_user_summary()
-        summary["initialized"] = True
-        return summary
-    except Exception as e:
-        logger.error(f"Summary failed for {user_id}: {e}")
-        return {
-            "user_id": user_id,
-            "name_display": user_id,
-            "preferences": [],
-            "member_level": "",
-            "member_tag": "",
-            "initialized": True,
-        }
-
-
-@app.post("/api/{user_id}/chat")
-async def send_message(user_id: str, data: ChatRequest):
-    """发送消息并获取回复"""
-    instance = manager.get(user_id)
-    if not instance or not instance.initialized:
-        return JSONResponse(
-            status_code=400,
-            content={"error": "系统未初始化，请刷新页面"},
-        )
-
-    if not data.message.strip():
-        return JSONResponse(
-            status_code=400,
-            content={"error": "请输入消息"},
-        )
-
-    try:
-        logger.info(f"[{user_id}] ➤ {data.message}")
-        result = await instance.process_message(data.message)
-        logger.info(f"[{user_id}] ◀ {result.get('response', '')[:80]}...")
-        return result
-    except Exception as e:
-        logger.error(f"Chat failed for {user_id}: {e}")
-        return JSONResponse(
-            status_code=500,
-            content={"error": f"处理失败: {str(e)}"},
-        )
-
-
-@app.post("/api/{user_id}/chat/stream")
-async def stream_message(user_id: str, data: ChatRequest):
-    """Stream chat progress and response chunks as newline-delimited JSON."""
-    instance = manager.get(user_id)
-    if not instance or not instance.initialized:
-        return JSONResponse(
-            status_code=400,
-            content={"error": "系统未初始化，请刷新页面"},
-        )
-
-    if not data.message.strip():
-        return JSONResponse(
-            status_code=400,
-            content={"error": "请输入消息"},
-        )
-
-    async def event_stream():
-        try:
-            logger.info(f"[{user_id}] -> {data.message}")
-            async for event in instance.stream_message(data.message):
-                yield json.dumps(event, ensure_ascii=False) + "\n"
-        except Exception as e:
-            logger.error(f"Streaming chat failed for {user_id}: {e}")
-            yield json.dumps(
-                {"type": "error", "error": f"处理失败: {str(e)}"},
-                ensure_ascii=False,
-            ) + "\n"
-
-    return StreamingResponse(
-        event_stream(),
-        media_type="application/x-ndjson; charset=utf-8",
-        headers={"Cache-Control": "no-cache"},
-    )
+@app.get("/metrics", response_class=PlainTextResponse)
+async def metrics():
+    return PlainTextResponse(render_metrics(), media_type="text/plain; version=0.0.4; charset=utf-8")
