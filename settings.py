@@ -56,6 +56,8 @@ LLM_CONFIG = {
 SYSTEM_CONFIG = {
     "enable_llm": _bool_env("HOMMEY_ENABLE_LLM", True),
     "log_level": os.getenv("HOMMEY_LOG_LEVEL", "INFO"),
+    "log_format": os.getenv("HOMMEY_LOG_FORMAT", "text"),
+    "preflight_include_network": _bool_env("HOMMEY_PREFLIGHT_INCLUDE_NETWORK", False),
     "max_retries": _int_env("HOMMEY_SYSTEM_MAX_RETRIES", 3),
     "timeout": _int_env("HOMMEY_TIMEOUT", 60),
 }

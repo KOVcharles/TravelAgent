@@ -8,7 +8,7 @@ import os
 import re
 import shutil
 import time
-from pathlib import Path
+from pathlib import Path, PosixPath
 from typing import Any, Dict, List, Optional
 
 from .schemas import KnowledgeChunk, RetrievalResult
@@ -78,6 +78,16 @@ def resolve_milvus_uri(knowledge_base_path: str) -> str:
     if default_db.exists() and default_db.is_file():
         return str(base / "milvus_lite_v2.db")
     return str(default_db)
+
+
+def _resolve_local_path(path: str | Path) -> Path:
+    """Resolve paths even when tests monkeypatch os.name to simulate Windows."""
+    try:
+        return Path(path).resolve()
+    except Exception as exc:
+        if "cannot instantiate" not in str(exc) or "WindowsPath" not in str(exc):
+            raise
+        return PosixPath(path).resolve()
 
 
 class MilvusKnowledgeStore:
@@ -162,8 +172,8 @@ class MilvusKnowledgeStore:
         self.load_collection()
 
     def _cleanup_local_collection_dir(self) -> None:
-        db_root = Path(self.milvus_uri).resolve()
-        collection_dir = (db_root / "collections" / self.collection_name).resolve()
+        db_root = _resolve_local_path(self.milvus_uri)
+        collection_dir = _resolve_local_path(db_root / "collections" / self.collection_name)
         if not collection_dir.is_relative_to(db_root):
             raise RuntimeError(f"Refusing to clean collection outside Milvus root: {collection_dir}")
         if collection_dir.exists():
@@ -172,8 +182,8 @@ class MilvusKnowledgeStore:
     def _prepare_windows_manifest_replace(self) -> None:
         if os.name != "nt":
             return
-        db_root = Path(self.milvus_uri).resolve()
-        manifest_path = (db_root / "collections" / self.collection_name / "manifest.json").resolve()
+        db_root = _resolve_local_path(self.milvus_uri)
+        manifest_path = _resolve_local_path(db_root / "collections" / self.collection_name / "manifest.json")
         if not manifest_path.is_relative_to(db_root):
             raise RuntimeError(f"Refusing to edit manifest outside Milvus root: {manifest_path}")
         if manifest_path.exists():
