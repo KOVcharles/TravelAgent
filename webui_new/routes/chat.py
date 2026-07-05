@@ -10,11 +10,12 @@ import logging
 import asyncio
 import time
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
 
 from utils.logging_safety import sanitize_for_log
 from utils.observability import COMPONENT_HTTP, record_app_error, record_http_request
+from webui_new.auth import User, require_path_user
 from webui_new.core.errors import AppError, BusinessError, InternalError, request_id, stream_error_event
 from webui_new.schemas.requests import ChatRequest
 
@@ -26,7 +27,9 @@ def create_chat_router(manager):
     router = APIRouter()
 
     @router.post("/api/{user_id}/chat")
-    async def send_message(request: Request, user_id: str, data: ChatRequest):
+    async def send_message(
+        request: Request, user_id: str, data: ChatRequest, current_user: User = Depends(require_path_user)
+    ):
         """发送消息并获取回复"""
         instance = manager.get(user_id)
         if not instance or not instance.initialized:
@@ -47,7 +50,9 @@ def create_chat_router(manager):
             raise InternalError("CHAT_FAILED", "处理失败，请稍后重试")
 
     @router.post("/api/{user_id}/chat/stream")
-    async def stream_message(request: Request, user_id: str, data: ChatRequest):
+    async def stream_message(
+        request: Request, user_id: str, data: ChatRequest, current_user: User = Depends(require_path_user)
+    ):
         """Stream chat progress and response chunks as newline-delimited JSON."""
         instance = manager.get(user_id)
         if not instance or not instance.initialized:

@@ -138,11 +138,11 @@
         @keyframes blink { 50% { opacity: 0; } }
 
         .login-form {
-            width: min(520px, 100%);
+            width: min(720px, 100%);
             margin-top: 28px;
             padding: 7px;
             display: grid;
-            grid-template-columns: 1fr auto;
+            grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr) auto;
             gap: 7px;
             border-radius: 999px;
             background: rgba(255,255,255,0.82);
@@ -285,15 +285,16 @@
                 data-phrases="今天我要去上海出差，补贴标准是怎么样？|下周去深圳，两天一晚怎么安排更稳妥？|帮我查一下北京到杭州的高铁和住宿标准。|明早 9 点到虹桥，几点出门比较稳妥？|这次可以订一等座吗？帮我看一下差旅规则。|会议在静安寺附近，酒店选哪里更合适？|帮我把三天两晚的行程整理成可执行计划。|如果航班延误，帮我准备一个备选路线。"
             ></div>
 
-            <form id="loginForm" class="login-form" autocomplete="off">
-                <input id="userId" class="input-field" type="text" placeholder="输入用户 ID" autocomplete="off" spellcheck="false" autofocus>
+            <form id="loginForm" class="login-form" autocomplete="on">
+                <input id="email" class="input-field" type="email" placeholder="邮箱" autocomplete="email" spellcheck="false" autofocus>
+                <input id="password" class="input-field" type="password" placeholder="密码" autocomplete="current-password">
                 <button id="submitBtn" class="submit-btn" type="submit">
                     <span id="btnText">进入 Hommey</span>
                     <span id="btnLoading" style="display:none;"><span class="spinner"></span>正在进入</span>
                 </button>
             </form>
             <div id="errorMsg" class="error-msg">
-                <span id="errorText">请输入有效的用户 ID</span>
+                <span id="errorText">请输入邮箱和密码</span>
             </div>
         </section>
 
@@ -309,7 +310,8 @@
 
     <script>
         const form = document.getElementById('loginForm');
-        const input = document.getElementById('userId');
+        const emailInput = document.getElementById('email');
+        const passwordInput = document.getElementById('password');
         const submitBtn = document.getElementById('submitBtn');
         const btnText = document.getElementById('btnText');
         const btnLoading = document.getElementById('btnLoading');
@@ -320,7 +322,7 @@
         function showError(message) {
             errorText.textContent = message;
             errorMsg.classList.add('visible');
-            input.focus();
+            (emailInput.value.trim() ? passwordInput : emailInput).focus();
         }
 
         function clearError() {
@@ -364,24 +366,38 @@
             tick();
         }
 
-        input.addEventListener('input', clearError);
+        emailInput.addEventListener('input', clearError);
+        passwordInput.addEventListener('input', clearError);
+
+        function decodeJwtPayload(token) {
+            const part = String(token || '').split('.')[1];
+            if (!part) return null;
+            const normalized = part.replace(/-/g, '+').replace(/_/g, '/');
+            const padded = normalized + '='.repeat((4 - normalized.length % 4) % 4);
+            try {
+                return JSON.parse(decodeURIComponent(escape(atob(padded))));
+            } catch (err) {
+                return null;
+            }
+        }
 
         form.addEventListener('submit', async (event) => {
             event.preventDefault();
             clearError();
 
-            const userId = input.value.trim();
-            if (!userId) {
-                showError('请输入您的用户 ID');
+            const email = emailInput.value.trim();
+            const password = passwordInput.value;
+            if (!email || !password) {
+                showError('请输入邮箱和密码');
                 return;
             }
 
             setLoading(true);
             try {
-                const res = await fetch('/login', {
+                const res = await fetch('/auth/login', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ user_id: userId }),
+                    body: JSON.stringify({ email, password }),
                 });
                 if (!res.ok) {
                     const err = await res.json();
@@ -390,7 +406,17 @@
                     return;
                 }
                 const data = await res.json();
-                window.location.href = data.redirect;
+                const payload = decodeJwtPayload(data.access_token);
+                const userId = payload && payload.sub;
+                if (!userId) {
+                    showError('登录成功但无法读取用户身份，请联系管理员');
+                    setLoading(false);
+                    return;
+                }
+                localStorage.setItem('hommey.access_token', data.access_token);
+                localStorage.setItem('hommey.refresh_token', data.refresh_token);
+                localStorage.setItem('hommey.user_id', String(userId));
+                window.location.href = `/chat/${encodeURIComponent(userId)}`;
             } catch (err) {
                 showError('网络错误，请检查连接后重试');
                 setLoading(false);

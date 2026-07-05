@@ -17,6 +17,9 @@
 
     const assistantImage = '/static/assets/hommey-avatar.jpg';
     const defaultPlaceholder = '告诉 Hommey 你的出行需求，例如：下周一去上海出差两天';
+    const ACCESS_TOKEN_KEY = 'hommey.access_token';
+    const REFRESH_TOKEN_KEY = 'hommey.refresh_token';
+    const USER_ID_KEY = 'hommey.user_id';
 
     let isProcessing = false;
     let isOnboarding = false;
@@ -60,6 +63,12 @@
     });
     sendBtn.addEventListener('click', submitCurrentInput);
 
+    document.querySelectorAll('.logout-link').forEach((link) => {
+        link.addEventListener('click', () => {
+            clearAuth();
+        });
+    });
+
     document.querySelectorAll('.quick-btn').forEach((button) => {
         button.addEventListener('click', () => {
             if (isOnboarding || isProcessing) return;
@@ -70,6 +79,7 @@
     });
 
     async function initialize() {
+        if (!ensureAuthenticatedPath()) return;
         try {
             const status = await fetchJson(`/api/${encodeURIComponent(userId)}/status`);
             if (!status.initialized) {
@@ -121,7 +131,14 @@
         const status = document.querySelector('.init-status');
         const sub = document.querySelector('.init-sub');
         if (status) status.textContent = message;
-        if (sub) sub.textContent = '请刷新页面重试';
+        if (sub) {
+            sub.replaceChildren();
+            const link = document.createElement('a');
+            link.href = '/';
+            link.textContent = '返回登录页';
+            link.addEventListener('click', clearAuth);
+            sub.append('请重新登录，或', link);
+        }
     }
 
     async function loadUserSummary() {
@@ -290,7 +307,7 @@
         showProcessingIndicator([]);
 
         try {
-            const res = await fetch(`/api/${encodeURIComponent(userId)}/chat/stream`, {
+            const res = await authFetch(`/api/${encodeURIComponent(userId)}/chat/stream`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ message: text }),
@@ -521,10 +538,100 @@
     }
 
     async function fetchJson(url, options) {
-        const res = await fetch(url, options);
+        const res = await authFetch(url, options);
         const data = await res.json();
         if (!res.ok) throw createApiError(data, '请求失败', res.status);
         return data;
+    }
+
+    function getAccessToken() {
+        return localStorage.getItem(ACCESS_TOKEN_KEY) || '';
+    }
+
+    function getRefreshToken() {
+        return localStorage.getItem(REFRESH_TOKEN_KEY) || '';
+    }
+
+    function clearAuth() {
+        localStorage.removeItem(ACCESS_TOKEN_KEY);
+        localStorage.removeItem(REFRESH_TOKEN_KEY);
+        localStorage.removeItem(USER_ID_KEY);
+    }
+
+    function decodeJwtPayload(token) {
+        const part = String(token || '').split('.')[1];
+        if (!part) return null;
+        const normalized = part.replace(/-/g, '+').replace(/_/g, '/');
+        const padded = normalized + '='.repeat((4 - normalized.length % 4) % 4);
+        try {
+            return JSON.parse(decodeURIComponent(escape(atob(padded))));
+        } catch (err) {
+            return null;
+        }
+    }
+
+    function ensureAuthenticatedPath() {
+        const token = getAccessToken();
+        if (!token) {
+            showInitError('请先登录');
+            return false;
+        }
+
+        const payload = decodeJwtPayload(token);
+        const tokenUserId = payload && payload.sub;
+        if (!tokenUserId) {
+            clearAuth();
+            showInitError('登录信息无效');
+            return false;
+        }
+
+        localStorage.setItem(USER_ID_KEY, String(tokenUserId));
+        if (String(tokenUserId) !== String(userId)) {
+            window.location.replace(`/chat/${encodeURIComponent(tokenUserId)}`);
+            return false;
+        }
+        return true;
+    }
+
+    async function authFetch(url, options) {
+        const first = await fetchWithAccessToken(url, options);
+        if (first.status !== 401) return first;
+
+        const refreshed = await refreshAccessToken();
+        if (!refreshed) {
+            clearAuth();
+            return first;
+        }
+        return fetchWithAccessToken(url, options);
+    }
+
+    async function fetchWithAccessToken(url, options) {
+        const headers = new Headers((options && options.headers) || {});
+        const token = getAccessToken();
+        if (token) headers.set('Authorization', `Bearer ${token}`);
+        return fetch(url, { ...(options || {}), headers });
+    }
+
+    async function refreshAccessToken() {
+        const refreshToken = getRefreshToken();
+        if (!refreshToken) return false;
+        try {
+            const res = await fetch('/auth/refresh', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ refresh_token: refreshToken }),
+            });
+            if (!res.ok) return false;
+            const data = await res.json();
+            const payload = decodeJwtPayload(data.access_token);
+            if (!payload || String(payload.sub) !== String(userId)) return false;
+            localStorage.setItem(ACCESS_TOKEN_KEY, data.access_token);
+            localStorage.setItem(REFRESH_TOKEN_KEY, data.refresh_token);
+            localStorage.setItem(USER_ID_KEY, String(payload.sub));
+            return true;
+        } catch (err) {
+            return false;
+        }
     }
 
     class ApiError extends Error {

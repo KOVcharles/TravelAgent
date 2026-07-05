@@ -7,9 +7,10 @@
 """
 import logging
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 
 from utils.logging_safety import sanitize_for_log
+from webui_new.auth import User, require_path_user
 from webui_new.core.errors import InternalError, request_id
 
 logger = logging.getLogger(__name__)
@@ -20,7 +21,7 @@ def create_users_router(manager):
     router = APIRouter(prefix="/api/{user_id}")
 
     @router.post("/init")
-    async def initialize_user(request: Request, user_id: str):
+    async def initialize_user(request: Request, user_id: str, current_user: User = Depends(require_path_user)):
         """初始化用户实例"""
         try:
             instance = await manager.initialize_user(user_id)
@@ -30,12 +31,12 @@ def create_users_router(manager):
             raise InternalError("INIT_FAILED", "初始化失败，请稍后刷新页面重试")
 
     @router.get("/status")
-    async def get_status(user_id: str):
+    async def get_status(user_id: str, current_user: User = Depends(require_path_user)):
         """获取用户实例状态"""
         return manager.get_status(user_id)
 
     @router.get("/is-new")
-    async def is_new_user(user_id: str):
+    async def is_new_user(user_id: str, current_user: User = Depends(require_path_user)):
         """检查是否为新用户"""
         instance = manager.get(user_id)
         if not instance or not instance.initialized:
@@ -47,7 +48,7 @@ def create_users_router(manager):
             return {"is_new": True}
 
     @router.get("/summary")
-    async def get_user_summary(request: Request, user_id: str):
+    async def get_user_summary(request: Request, user_id: str, current_user: User = Depends(require_path_user)):
         """获取用户摘要信息（右侧面板）"""
         instance = manager.get(user_id)
         if not instance or not instance.initialized:
