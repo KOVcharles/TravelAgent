@@ -146,3 +146,13 @@ MCP_CONFIG = {
         },
     },
 }
+
+
+# 鉴权系统（JWT + bcrypt）。secret 仅来自环境变量；为 None/空 时由
+# webui_new/auth/security.py 在签发/校验前显式抛错，绝不在此硬编码默认值。
+AUTH_CONFIG = {
+    "jwt_secret": _optional_env("HOMMEY_JWT_SECRET"),
+    "jwt_algorithm": os.getenv("HOMMEY_JWT_ALGO", "HS256"),
+    "access_expire_minutes": _int_env("HOMMEY_JWT_ACCESS_EXPIRE_MINUTES", 30),
+    "refresh_expire_days": _int_env("HOMMEY_JWT_REFRESH_EXPIRE_DAYS", 7),
+}

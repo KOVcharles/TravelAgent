@@ -9,6 +9,8 @@ import json
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+from webui_new.auth.deps import require_path_user
+from webui_new.auth.storage import User
 from webui_new.manager import HommeyWebInstance
 from webui_new.server import app, manager
 
@@ -25,8 +27,16 @@ def anyio_backend():
 
 @pytest.fixture
 async def client():
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as test_client:
-        yield test_client
+    # 本文件聚焦业务错误响应契约；用 dependency override 绕过鉴权直达业务逻辑。
+    async def _bypass_auth():
+        return User(id=0, email="test@example.com", password_hash="", created_at="2026-01-01T00:00:00+00:00")
+
+    app.dependency_overrides[require_path_user] = _bypass_auth
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as test_client:
+            yield test_client
+    finally:
+        app.dependency_overrides.clear()
 
 
 def _all_route_paths():

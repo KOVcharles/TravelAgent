@@ -7,6 +7,8 @@ from httpx import ASGITransport, AsyncClient
 from utils.observability import InMemoryMetricsSink, record_alert, record_http_request, record_upstream_error
 from utils.preflight import run_preflight
 from utils.structured_logging import JsonFormatter
+from webui_new.auth.deps import require_path_user
+from webui_new.auth.storage import User
 from webui_new.server import app
 
 
@@ -110,8 +112,17 @@ async def test_observability_endpoints(monkeypatch):
 async def test_error_log_contains_required_context_fields(caplog):
     caplog.set_level(logging.WARNING)
 
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
-        await client.post("/api/u1/chat", json={}, headers={"X-Request-ID": "rid-log"})
+    # 该测试聚焦 validation_error 日志字段；用 dependency override 绕过鉴权，
+    # 使空请求体能走到 body 校验阶段产出 422（而非先被 require_path_user 拦为 401）。
+    async def _bypass_auth():
+        return User(id=0, email="test@example.com", password_hash="", created_at="2026-01-01T00:00:00+00:00")
+
+    app.dependency_overrides[require_path_user] = _bypass_auth
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+            await client.post("/api/u1/chat", json={}, headers={"X-Request-ID": "rid-log"})
+    finally:
+        app.dependency_overrides.clear()
 
     matching = [record for record in caplog.records if record.getMessage() == "validation_error"]
     assert matching

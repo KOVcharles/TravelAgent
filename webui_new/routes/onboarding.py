@@ -6,9 +6,10 @@ HommeyWebInstance/InitialPreferenceOnboarding，避免路由层变厚。
 """
 import logging
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 
 from utils.logging_safety import sanitize_for_log
+from webui_new.auth import User, require_path_user
 from webui_new.core.errors import BusinessError, StorageError, ValidationError, request_id
 from webui_new.schemas.requests import OnboardingPreferenceRequest
 
@@ -20,7 +21,7 @@ def create_onboarding_router(manager):
     router = APIRouter()
 
     @router.get("/api/{user_id}/onboarding")
-    async def get_onboarding_state(request: Request, user_id: str):
+    async def get_onboarding_state(request: Request, user_id: str, current_user: User = Depends(require_path_user)):
         """获取新用户初始化偏好进度"""
         instance = manager.get(user_id)
         if not instance or not instance.initialized:
@@ -32,7 +33,9 @@ def create_onboarding_router(manager):
             return {"is_new": True, "completed": False, "missing_keys": []}
 
     @router.post("/api/{user_id}/onboarding/preference")
-    async def save_onboarding_preference(request: Request, user_id: str, data: OnboardingPreferenceRequest):
+    async def save_onboarding_preference(
+        request: Request, user_id: str, data: OnboardingPreferenceRequest, current_user: User = Depends(require_path_user)
+    ):
         """保存新用户初始化偏好，不经过普通聊天链路"""
         instance = manager.get(user_id)
         if not instance or not instance.initialized:

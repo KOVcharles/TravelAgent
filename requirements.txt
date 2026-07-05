@@ -37,6 +37,12 @@ redis>=5.0.0,<7.0.0
 # 长期记忆 PostgreSQL 存储
 psycopg[binary]
 
+# 鉴权系统（JWT + bcrypt + 邮箱校验）
+PyJWT>=2.8
+passlib[bcrypt]>=1.7.4
+bcrypt>=4.0,<4.1          # 收紧上限以规避 passlib 1.7 与 bcrypt≥4.1 的兼容告警（见 questions.md Q-F）
+email-validator>=2.0      # pydantic v2 EmailStr 所需
+
 # Test runner
 pytest==8.3.4
 
