@@ -41,6 +41,13 @@ services:
       postgres:
         condition: service_healthy
     restart: unless-stopped
+    # 宿主 resolv.conf 的上游 DNS 从 bridge 网络解析不了外部域名，显式指定公共 DNS，
+    # 否则容器连不上 SiliconFlow / LLM 端点（RAG/LLM 全挂）。
+    # 注意：实测 223.5.5.5 / 114.114.114.114 从本机 bridge 的 UDP 53 不可达，只有 8.8.8.8 通，
+    # 故以 8.8.8.8 为主（api.siliconflow.cn 等公网域名它都能解析）。
+    dns:
+      - 8.8.8.8         # 实测从 bridge 可达
+      - 223.5.5.5       # AliDNS（备，本机 bridge 当前暂不可达）
     command: python run_webui.py
 
   redis:
