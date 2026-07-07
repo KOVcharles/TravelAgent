@@ -35,7 +35,7 @@ async def run_preflight(include_network: bool = False) -> dict:
     """Run readiness checks and return a stable API-friendly summary."""
     checks: list[Callable[[], Awaitable[CheckResult]]] = [
         check_api_key,
-        check_rag_model_path,
+        check_rag_embedding_config,
         check_milvus_data_dir,
         check_mcp_config,
     ]
@@ -114,17 +114,30 @@ async def check_postgres() -> CheckResult:
         return _result("postgres_connect", COMPONENT_POSTGRES, False, "postgres unavailable", start)
 
 
-async def check_rag_model_path() -> CheckResult:
+async def check_rag_embedding_config() -> CheckResult:
     start = time.perf_counter()
-    path = Path(RAG_CONFIG.get("embedding_model", "")).expanduser()
-    ok = path.exists() and os.access(path, os.R_OK)
+    backend = str(RAG_CONFIG.get("embedding_backend") or "siliconflow").lower()
+    if backend == "local":
+        path = Path(RAG_CONFIG.get("embedding_model", "")).expanduser()
+        ok = path.exists() and os.access(path, os.R_OK)
+        return _result(
+            "rag_embedding",
+            COMPONENT_RAG,
+            ok,
+            "local embedding model path readable" if ok else "local RAG embedding model path is missing or unreadable",
+            start,
+            {"backend": backend, "path": str(path)},
+        )
+    api_key = str(RAG_CONFIG.get("embedding_api_key") or "").strip()
+    base_url = str(RAG_CONFIG.get("embedding_base_url") or "").strip()
+    ok = bool(api_key and base_url)
     return _result(
-        "rag_model_path",
+        "rag_embedding",
         COMPONENT_RAG,
         ok,
-        "embedding model path readable" if ok else "RAG embedding model path is missing or unreadable",
+        "cloud embedding configured" if ok else "HOMMEY_EMBEDDING_API_KEY or SILICONFLOW_API_KEY is missing",
         start,
-        {"path": str(path)},
+        {"backend": backend, "base_url": base_url, "model": RAG_CONFIG.get("embedding_model")},
     )
 
 

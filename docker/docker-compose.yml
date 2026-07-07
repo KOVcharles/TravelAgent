@@ -16,9 +16,9 @@ services:
       - path: ../.env
         required: false
     environment:
-      HOMMEY_MODEL_NAME: ${HOMMEY_MODEL_NAME:-deepseek-v4-flash}
-      HOMMEY_BASE_URL: ${HOMMEY_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1}
-      HOMMEY_HEALTH_CHECK_TIMEOUT_SEC: ${HOMMEY_HEALTH_CHECK_TIMEOUT_SEC:-60}
+      # HOMMEY_MODEL_NAME / HOMMEY_BASE_URL / HOMMEY_HEALTH_CHECK_TIMEOUT_SEC 故意不在此声明：
+      # 同 embedding，它们由上面的 env_file(../.env) 提供。若用 ${VAR:-...} 重复声明，不带 --env-file
+      # 启动时 ${VAR} 会解析为空并覆盖 .env 真值（BASE_URL 曾因此被打成 dashscope 默认地址）。
       PYTHONUTF8: "1"
       PYTHONIOENCODING: utf-8
       HOMMEY_SHORT_TERM_BACKEND: redis
@@ -27,12 +27,13 @@ services:
       HOMMEY_REDIS_PASSWORD: ""
       HOMMEY_LONG_TERM_BACKEND: postgres
       HOMMEY_POSTGRES_DSN: postgresql://hommey:${PG_PASSWORD:-hommey123}@hommey-postgres:5432/hommey
+      # HOMMEY_EMBEDDING_*（backend/model/api_key/base_url/dimension）故意不在 environment: 声明：
+      # 它们由上面的 env_file(../.env) 提供。若在此用 ${VAR:-...} 重复声明，不带 --env-file 启动时
+      # ${VAR} 会解析为空，而 environment: 优先级高于 env_file，会把真值（尤其 API key）覆盖成空 → RAG 静默失效。
       HOMMEY_RAG_DOCUMENTS_DIR: /app/data/documents
       HOMMEY_RAG_KNOWLEDGE_BASE_PATH: /app/data/rag_knowledge
-      HOMMEY_EMBEDDING_MODEL: /app/data/models/bge-small-zh-v1.5
     volumes:
       - ../data/documents:/app/data/documents:ro
-      - ../data/models:/app/data/models:ro
       - ../data/rag_knowledge:/app/data/rag_knowledge
     depends_on:
       redis:

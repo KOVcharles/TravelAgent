@@ -2,6 +2,7 @@ from pathlib import Path
 
 from rag.chunker import split_text
 from rag.document_loader import load_text_documents
+from rag.embedder import SiliconFlowEmbedder
 from rag.milvus_store import MilvusKnowledgeStore, fuse_results, rerank_results
 from rag.retriever import expand_query
 
@@ -70,6 +71,51 @@ def test_meal_allowance_query_expands_and_reranks_meal_policy():
 
     assert "餐费" in query
     assert results[0]["id"] == 2
+
+
+def test_siliconflow_embedder_posts_openai_compatible_payload():
+    class FakeResponse:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {
+                "data": [
+                    {"index": 0, "embedding": [0.1, 0.2, 0.3]},
+                    {"index": 1, "embedding": [0.4, 0.5, 0.6]},
+                ]
+            }
+
+    class FakeSession:
+        def __init__(self):
+            self.calls = []
+
+        def post(self, url, headers, json, timeout):
+            self.calls.append({"url": url, "headers": headers, "json": json, "timeout": timeout})
+            return FakeResponse()
+
+    session = FakeSession()
+    embedder = SiliconFlowEmbedder(
+        api_key="test-key",
+        model="BAAI/bge-m3",
+        base_url="https://api.siliconflow.cn/v1/",
+        dimension=3,
+        timeout_sec=12,
+        batch_size=8,
+        session=session,
+    )
+
+    embeddings = embedder.embed_texts(["hello", "world"])
+
+    assert embeddings == [[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]]
+    assert session.calls[0]["url"] == "https://api.siliconflow.cn/v1/embeddings"
+    assert session.calls[0]["headers"]["Authorization"] == "Bearer test-key"
+    assert session.calls[0]["json"] == {
+        "model": "BAAI/bge-m3",
+        "input": ["hello", "world"],
+        "encoding_format": "float",
+    }
+    assert session.calls[0]["timeout"] == 12
 
 
 def test_rebuild_collection_recovers_from_windows_manifest_replace_error(tmp_path: Path):
