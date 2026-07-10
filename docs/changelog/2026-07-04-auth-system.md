@@ -108,7 +108,7 @@ JWT（access / refresh 双 token）+ 路由级「身份绑定」保护。此前 
 | `HOMMEY_JWT_ACCESS_EXPIRE_MINUTES` | `30` | access token 有效期 |
 | `HOMMEY_JWT_REFRESH_EXPIRE_DAYS` | `7` | refresh token 有效期 |
 
-新增依赖（已写入 `requirements.txt` / `requirements-docker.txt`）：
+新增依赖（已写入 `requirements.txt`）：
 `PyJWT>=2.8`、`passlib[bcrypt]>=1.7.4`、`bcrypt>=4.0,<4.1`、`email-validator>=2.0`、`psycopg[binary]`。
 
 ---
@@ -294,5 +294,5 @@ SSL: Disabled
 ### 排障记录
 
 - 本地非 Docker 服务曾因当前 Python 环境缺少 `psycopg` 导致 `/auth/register` 500；Docker 方式不应依赖宿主机 Python 包。
-- 旧 Docker 镜像缺少 `passlib` / `bcrypt` / `email-validator` 等新鉴权依赖，重启后会在 import `webui_new.auth.security` 时失败。长期解法是重建镜像；开发时确认 `requirements-docker.txt` 已包含这些依赖。
+- 旧 Docker 镜像缺少 `passlib` / `bcrypt` / `email-validator` 等新鉴权依赖，重启后会在 import `webui_new.auth.security` 时失败。长期解法是重建镜像；开发时确认 `requirements.txt` 已包含这些依赖。
 - 如果页面仍是旧版用户 ID 登录框，通常是没有使用 `docker-compose.dev.yml` 挂载当前源码。

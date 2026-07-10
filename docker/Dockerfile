@@ -24,11 +24,11 @@ RUN set -eux; \
     && rm -rf /var/lib/apt/lists/*
 
 # ── 先只复制依赖文件，利用 Docker 层缓存 ──
-COPY requirements-docker.txt .
+COPY requirements.txt .
 
 # ── 安装依赖（全部走清华镜像） ──
 RUN pip install --no-cache-dir --upgrade pip \
-    && pip install --no-cache-dir -r requirements-docker.txt \
+    && pip install --no-cache-dir -r requirements.txt \
         -i https://pypi.tuna.tsinghua.edu.cn/simple
 
 # ── 最后复制项目代码 ──
