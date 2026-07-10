@@ -8,7 +8,7 @@
   用 intent_to_skill() 替代本地 skill_mapping。
 - core/intent_guard.py / core/intent_router.py —— 用 CHITCHAT_EXACT / CHITCHAT_KEYWORDS
   识别寒暄，并统一路由到 chitchat skill。
-- cli.py / webui.py / webui_new/manager.py —— 用 INTENT_DISPLAY_NAMES 统一中文标签。
+- cli.py / legacy/webui_gradio.py / webui_new/manager.py —— 用 INTENT_DISPLAY_NAMES 统一中文标签。
 
 一致性由 tests/test_intent_catalog.py 保证：目录中的 skill 集合必须与
 utils.skill_loader 实际发现的 skill 目录一致，防止漂移。

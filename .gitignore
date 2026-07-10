@@ -49,6 +49,7 @@ wheels/
 !.env.example
 /config.py
 /config.local.py
+*.session.sql
 
 # Data
 data/documents/*
@@ -78,6 +79,12 @@ data/models/*
 # Test and benchmark output
 tests/results/
 benchmark-results/
+
+# Local workflow/review outputs
+reviews/
+auth-pipeline/
+observer/
+unison-workflows/
 
 # Logs
 *.log

@@ -34,6 +34,7 @@ class KnowledgeRetriever:
         knowledge_base_path: Optional[str] = None,
         collection_name: Optional[str] = None,
         embedding_model: Optional[str] = None,
+        embedding_backend: Optional[str] = None,
         top_k: int = 3,
         vector_store: Optional[VectorStore] = None,
     ):
@@ -60,6 +61,7 @@ class KnowledgeRetriever:
                     "knowledge_base_path": knowledge_base_path,
                     "collection_name": collection_name,
                     "embedding_model": embedding_model,
+                    "embedding_backend": embedding_backend,
                     "top_k": top_k,
                 }
             )
@@ -67,6 +69,12 @@ class KnowledgeRetriever:
                 knowledge_base_path=config.knowledge_base_path,
                 collection_name=config.collection_name,
                 embedding_model=config.embedding_model,
+                embedding_backend=config.embedding_backend,
+                embedding_api_key=config.embedding_api_key,
+                embedding_base_url=config.embedding_base_url,
+                embedding_dimension=config.embedding_dimension,
+                embedding_batch_size=config.embedding_batch_size,
+                embedding_timeout_sec=config.embedding_timeout_sec,
                 top_k=config.top_k,
                 vector_top_k=config.vector_top_k,
                 bm25_top_k=config.bm25_top_k,

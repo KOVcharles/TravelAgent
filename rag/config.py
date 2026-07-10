@@ -9,7 +9,13 @@ from settings import RAG_CONFIG
 
 @dataclass(frozen=True)
 class RAGPipelineConfig:
-    embedding_model: str = "data/models/bge-small-zh-v1.5"
+    embedding_backend: str = "siliconflow"
+    embedding_model: str = "BAAI/bge-m3"
+    embedding_api_key: str | None = None
+    embedding_base_url: str = "https://api.siliconflow.cn/v1"
+    embedding_dimension: int = 1024
+    embedding_batch_size: int = 32
+    embedding_timeout_sec: float = 30.0
     documents_dir: str = "data/documents"
     knowledge_base_path: str = "data/rag_knowledge"
     collection_name: str = "business_travel_knowledge"
@@ -23,7 +29,13 @@ class RAGPipelineConfig:
     @classmethod
     def from_settings(cls, overrides: Optional[Dict[str, Any]] = None) -> "RAGPipelineConfig":
         data = {
+            "embedding_backend": RAG_CONFIG.get("embedding_backend", cls.embedding_backend),
             "embedding_model": RAG_CONFIG.get("embedding_model", cls.embedding_model),
+            "embedding_api_key": RAG_CONFIG.get("embedding_api_key", cls.embedding_api_key),
+            "embedding_base_url": RAG_CONFIG.get("embedding_base_url", cls.embedding_base_url),
+            "embedding_dimension": RAG_CONFIG.get("embedding_dimension", cls.embedding_dimension),
+            "embedding_batch_size": RAG_CONFIG.get("embedding_batch_size", cls.embedding_batch_size),
+            "embedding_timeout_sec": RAG_CONFIG.get("embedding_timeout_sec", cls.embedding_timeout_sec),
             "documents_dir": RAG_CONFIG.get("documents_dir", cls.documents_dir),
             "knowledge_base_path": RAG_CONFIG.get("knowledge_base_path", cls.knowledge_base_path),
             "collection_name": RAG_CONFIG.get("collection_name", cls.collection_name),

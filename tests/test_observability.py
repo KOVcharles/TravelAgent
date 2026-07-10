@@ -75,7 +75,9 @@ async def test_preflight_is_componentized_and_does_not_require_network(monkeypat
     import utils.preflight as preflight
 
     monkeypatch.setitem(preflight.LLM_CONFIG, "api_key", "")
-    monkeypatch.setitem(preflight.RAG_CONFIG, "embedding_model", str(tmp_path / "missing-model"))
+    monkeypatch.setitem(preflight.RAG_CONFIG, "embedding_backend", "siliconflow")
+    monkeypatch.setitem(preflight.RAG_CONFIG, "embedding_api_key", "")
+    monkeypatch.setitem(preflight.RAG_CONFIG, "embedding_base_url", "https://api.siliconflow.cn/v1")
     monkeypatch.setitem(preflight.RAG_CONFIG, "knowledge_base_path", str(tmp_path / "rag-store"))
     monkeypatch.setitem(preflight.MEMORY_CONFIG["short_term"], "backend", "memory")
     monkeypatch.setitem(preflight.MEMORY_CONFIG["long_term"], "backend", "file")
@@ -85,7 +87,7 @@ async def test_preflight_is_componentized_and_does_not_require_network(monkeypat
 
     assert result["ok"] is False
     assert checks["api_key"]["ok"] is False
-    assert checks["rag_model_path"]["ok"] is False
+    assert checks["rag_embedding"]["ok"] is False
     assert checks["milvus_data_dir"]["ok"] is True
     assert all("duration_ms" in item for item in result["checks"])
 

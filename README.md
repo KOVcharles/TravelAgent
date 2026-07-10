@@ -8,6 +8,7 @@ Hommey 是一个商旅助手项目，包含 FastAPI Web 界面、CLI、多智能
 - 鉴权: 邮箱 + 密码登录，JWT access/refresh token
 - 数据库: Docker PostgreSQL，服务名 `hommey-postgres`
 - 缓存: Docker Redis，服务名 `hommey-redis`
+- RAG Embedding: 默认使用 SiliconFlow 云端 `BAAI/bge-m3`，不在 Docker 镜像中部署本地 BGE/PyTorch
 - 开发模式: 使用 `docker/docker-compose.dev.yml` 挂载当前源码到容器 `/app`
 
 ## 快速启动
@@ -55,6 +56,10 @@ HOMMEY_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 
 HOMMEY_JWT_SECRET=replace-with-a-long-random-secret
 PG_PASSWORD=replace-with-a-postgres-password
+
+HOMMEY_EMBEDDING_API_KEY=your-siliconflow-api-key
+HOMMEY_RAG_EMBEDDING_BACKEND=siliconflow
+HOMMEY_EMBEDDING_MODEL=BAAI/bge-m3
 ```
 
 Docker Compose 会在容器内覆盖数据库和缓存相关地址：
@@ -64,9 +69,30 @@ HOMMEY_SHORT_TERM_BACKEND=redis
 HOMMEY_REDIS_HOST=hommey-redis
 HOMMEY_LONG_TERM_BACKEND=postgres
 HOMMEY_POSTGRES_DSN=postgresql://hommey:${PG_PASSWORD}@hommey-postgres:5432/hommey
+HOMMEY_EMBEDDING_BASE_URL=https://api.siliconflow.cn/v1
+HOMMEY_EMBEDDING_DIMENSION=1024
 ```
 
 所以在 Docker 环境里不要把 PostgreSQL 地址写成 `localhost`。`localhost` 指的是容器自己，不是 PostgreSQL 容器。
+
+### RAG Embedding
+
+默认配置使用 SiliconFlow 云端 BGE：
+
+```bash
+HOMMEY_RAG_EMBEDDING_BACKEND=siliconflow
+HOMMEY_EMBEDDING_MODEL=BAAI/bge-m3
+HOMMEY_EMBEDDING_API_KEY=your-siliconflow-api-key
+HOMMEY_EMBEDDING_BASE_URL=https://api.siliconflow.cn/v1
+HOMMEY_EMBEDDING_DIMENSION=1024
+```
+
+这样 Docker 镜像不再安装 `torch` / `sentence-transformers`，也不需要挂载 `data/models/bge-small-zh-v1.5`。如果确实要回退本地模型，需要手动安装 `sentence-transformers`，并配置：
+
+```bash
+HOMMEY_RAG_EMBEDDING_BACKEND=local
+HOMMEY_EMBEDDING_MODEL=data/models/bge-small-zh-v1.5
+```
 
 ## 创建用户
 

@@ -11,6 +11,7 @@ import time
 from pathlib import Path, PosixPath
 from typing import Any, Dict, List, Optional
 
+from .embedder import create_text_embedder
 from .schemas import KnowledgeChunk, RetrievalResult
 
 logger = logging.getLogger(__name__)
@@ -50,8 +51,6 @@ os.environ.setdefault("GRPC_HTTP2_MIN_PING_INTERVAL_WITHOUT_DATA_MS", _GRPC_MAX_
 
 try:
     from pymilvus import MilvusClient
-    from sentence_transformers import SentenceTransformer
-    from sentence_transformers import models as st_models
 
     DEPENDENCIES_AVAILABLE = True
 except ImportError as exc:
@@ -98,12 +97,18 @@ class MilvusKnowledgeStore:
         knowledge_base_path: str,
         collection_name: str,
         embedding_model: str,
+        embedding_backend: str = "siliconflow",
+        embedding_api_key: str | None = None,
+        embedding_base_url: str = "https://api.siliconflow.cn/v1",
+        embedding_dimension: int = 1024,
+        embedding_timeout_sec: float = 30.0,
+        embedding_batch_size: int = 32,
         top_k: int = 3,
         vector_top_k: int = 10,
         bm25_top_k: int = 10,
     ):
         if not DEPENDENCIES_AVAILABLE:
-            raise RuntimeError("RAG dependencies not installed: pymilvus, milvus-lite, sentence-transformers")
+            raise RuntimeError("RAG dependencies not installed: pymilvus, milvus-lite")
 
         self.knowledge_base_path = Path(knowledge_base_path)
         self.knowledge_base_path.mkdir(parents=True, exist_ok=True)
@@ -112,9 +117,17 @@ class MilvusKnowledgeStore:
         self.vector_top_k = vector_top_k
         self.bm25_top_k = bm25_top_k
 
-        model_path = resolve_embedding_model(embedding_model)
-        self.embedding_model = _get_embedding_model(model_path)
-        self.embedding_dim = self.embedding_model.get_sentence_embedding_dimension()
+        model_name = resolve_embedding_model(embedding_model) if embedding_backend == "local" else embedding_model
+        self.embedding_model = create_text_embedder(
+            backend=embedding_backend,
+            model=model_name,
+            api_key=embedding_api_key,
+            base_url=embedding_base_url,
+            dimension=embedding_dimension,
+            timeout_sec=embedding_timeout_sec,
+            batch_size=embedding_batch_size,
+        )
+        self.embedding_dim = self.embedding_model.dimension()
 
         self.milvus_uri = resolve_milvus_uri(str(self.knowledge_base_path))
         self.grpc_options = {
@@ -208,11 +221,13 @@ class MilvusKnowledgeStore:
             rows.append(
                 {
                     "id": doc_id,
-                    "vector": self.embedding_model.encode(chunk.content).tolist(),
                     "content": chunk.content,
                     "metadata": json.dumps(metadata, ensure_ascii=False),
                 }
             )
+        vectors = self.embedding_model.embed_texts([chunk.content for chunk in chunks])
+        for row, vector in zip(rows, vectors):
+            row["vector"] = vector
 
         self.client.insert(collection_name=self.collection_name, data=rows)
         self.load_collection()
@@ -220,7 +235,7 @@ class MilvusKnowledgeStore:
 
     def vector_search(self, query: str, top_k: Optional[int] = None) -> List[Dict[str, Any]]:
         self.load_collection()
-        query_embedding = self.embedding_model.encode(query).tolist()
+        query_embedding = self.embedding_model.embed_query(query)
         results = self.client.search(
             collection_name=self.collection_name,
             data=[query_embedding],
@@ -455,6 +470,9 @@ def _get_embedding_model(model_path: str):
     cached = _EMBEDDING_MODEL_CACHE.get(model_path)
     if cached is not None:
         return cached
+
+    from sentence_transformers import SentenceTransformer
+    from sentence_transformers import models as st_models
 
     local_path = Path(model_path)
     if local_path.exists() and not (local_path / "modules.json").exists():

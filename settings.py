@@ -64,10 +64,20 @@ SYSTEM_CONFIG = {
 
 
 RAG_CONFIG = {
+    "embedding_backend": os.getenv("HOMMEY_RAG_EMBEDDING_BACKEND", "siliconflow").lower(),
     "embedding_model": os.getenv(
         "HOMMEY_EMBEDDING_MODEL",
-        "data/models/bge-small-zh-v1.5",
+        "BAAI/bge-m3",
     ),
+    "embedding_api_key": _optional_env("HOMMEY_EMBEDDING_API_KEY")
+    or _optional_env("SILICONFLOW_API_KEY"),
+    "embedding_base_url": os.getenv(
+        "HOMMEY_EMBEDDING_BASE_URL",
+        "https://api.siliconflow.cn/v1",
+    ),
+    "embedding_dimension": _int_env("HOMMEY_EMBEDDING_DIMENSION", 1024),
+    "embedding_batch_size": _int_env("HOMMEY_EMBEDDING_BATCH_SIZE", 32),
+    "embedding_timeout_sec": _float_env("HOMMEY_EMBEDDING_TIMEOUT_SEC", 30.0),
     "documents_dir": os.getenv(
         "HOMMEY_RAG_DOCUMENTS_DIR",
         "data/documents",
