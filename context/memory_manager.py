@@ -112,10 +112,17 @@ class MemoryManager:
                 "preferences": self.long_term.get_preference(),
                 "chat_history": self.long_term.get_chat_history(10),
                 "trip_history": self.long_term.get_trip_history(5),
+                "active_trip": self.long_term.get_active_trip(),
                 "frequent_destinations": self.long_term.get_frequent_destinations(3),
                 "statistics": self.long_term.get_statistics()
             }
         }
+
+    def get_active_trip(self) -> Dict[str, Any] | None:
+        return self.long_term.get_active_trip()
+
+    def update_active_trip(self, trip_info: Dict[str, Any]) -> Dict[str, Any]:
+        return self.long_term.upsert_active_trip(trip_info)
 
     def get_context_for_agent(self, long_term_summary: str = None) -> str:
         """
@@ -205,7 +212,7 @@ class MemoryManager:
             destination = trip.get("destination", "未知")
             start_date = trip.get("start_date", "")
             end_date = trip.get("end_date", "")
-            purpose = trip.get("purpose", "旅游")
+            purpose = trip.get("purpose", "公司出差")
             timestamp = trip.get("timestamp", "")
 
             if start_date and end_date:

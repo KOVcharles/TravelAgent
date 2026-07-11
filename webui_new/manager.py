@@ -148,6 +148,11 @@ class HommeyWebInstance:
             "member_tag": "差旅常客",
         }
 
+    async def get_active_trip(self) -> dict:
+        if not self.memory_manager:
+            return {"active_trip": None}
+        return {"active_trip": self.memory_manager.get_active_trip()}
+
     @staticmethod
     def _is_simple_chitchat(message: str) -> bool:
         """快速判断是否纯闲聊（不经过 LLM）"""
@@ -408,9 +413,15 @@ class HommeyWebInstance:
         for idx in range(0, len(text), size):
             yield text[idx:idx + size]
 
-    @staticmethod
-    def _route_without_context(message: str):
+    def _route_without_context(self, message: str):
         """Run cheap routing before building memory context for context-free intents."""
+        short_term = getattr(self.memory_manager, "short_term", None)
+        if short_term is not None:
+            try:
+                if short_term.get_recent_context(n_turns=1):
+                    return None
+            except (AttributeError, TypeError):
+                pass
         route = FastIntentRouter.route(message)
         if not route or len(route.agent_schedule) != 1:
             return None
@@ -427,6 +438,13 @@ class HommeyWebInstance:
         recent_context = self.memory_manager.short_term.get_recent_context(n_turns=5)
 
         context_messages = []
+        active_trip = self.memory_manager.get_active_trip()
+        if active_trip:
+            context_messages.append(Msg(
+                name="system",
+                content="【当前出差任务】\n" + json.dumps(active_trip, ensure_ascii=False),
+                role="system",
+            ))
         if long_term_summary:
             context_messages.append(Msg(name="system", content=long_term_summary, role="system"))
         for msg in recent_context:
@@ -456,6 +474,10 @@ class HommeyWebInstance:
             summary_parts.append(chat_summary)
 
         all_trips = self.memory_manager.long_term.get_trip_history(limit=None)
+        active_trip = self.memory_manager.get_active_trip()
+        if active_trip:
+            summary_parts.append("\n【当前出差任务】")
+            summary_parts.append(json.dumps(active_trip, ensure_ascii=False))
         if all_trips:
             relevant_trips = []
             other_trips = []
@@ -552,6 +574,25 @@ class HommeyWebInstance:
             if itinerary:
                 parts = [f"✈️ **{itinerary.get('title', '行程规划')}**"]
                 parts.append(f"  时长: {itinerary.get('duration', '未知')}\n")
+                transport = itinerary.get("transport_recommendation")
+                if isinstance(transport, dict) and transport:
+                    parts.append("🚄 **交通建议**")
+                    if transport.get("preferred"):
+                        parts.append(f"  • 首选: {transport['preferred']}")
+                    if transport.get("reason"):
+                        parts.append(f"  • 原因: {transport['reason']}")
+                    if transport.get("alternative"):
+                        parts.append(f"  • 备选: {transport['alternative']}")
+                    if transport.get("verification"):
+                        parts.append(f"  • 核验: {transport['verification']}")
+                    parts.append("")
+                elif isinstance(transport, str) and transport:
+                    parts.extend(["🚄 **交通建议**", f"  • {transport}", ""])
+
+                lodging = itinerary.get("lodging_advice")
+                if lodging:
+                    parts.extend(["🏨 **住宿建议**", f"  • {lodging}", ""])
+
                 for day_plan in itinerary.get("daily_plans", []):
                     day_num = day_plan.get("day", 1)
                     parts.append(f"**第 {day_num} 天**")
@@ -578,6 +619,17 @@ class HommeyWebInstance:
                     parts.append("📌 **注意事项**")
                     for note in notes:
                         parts.append(f"  • {note}")
+                checklist = itinerary.get("reimbursement_checklist", [])
+                if checklist:
+                    parts.append("🧾 **报销准备**")
+                    for item in checklist:
+                        parts.append(f"  • {item}")
+                budget = itinerary.get("estimated_budget")
+                if budget:
+                    parts.append(f"💰 **预算参考**: {budget}")
+                missing_info = itinerary.get("missing_info", [])
+                if missing_info:
+                    parts.append(f"💡 **待补充**: {', '.join(missing_info)}")
                 return "\n".join(parts)
 
         # Preference
@@ -669,7 +721,25 @@ class HommeyWebInstance:
                 except Exception:
                     pass
             if answer:
-                return str(answer)
+                parts = [str(answer)]
+                sources = data.get("sources") or data.get("data", {}).get("sources") or []
+                if sources:
+                    parts.append("\n📚 **制度来源**")
+                    seen = set()
+                    for source in sources:
+                        if not isinstance(source, dict):
+                            continue
+                        location = " · ".join(
+                            str(value) for value in (
+                                source.get("file"),
+                                source.get("section"),
+                                source.get("page") and f"第{source['page']}页",
+                            ) if value
+                        )
+                        if location and location not in seen:
+                            seen.add(location)
+                            parts.append(f"  • {location}")
+                return "\n".join(parts)
 
         # Memory query
         if agent_name == "memory_query":
@@ -687,6 +757,33 @@ class HommeyWebInstance:
                 response = response.get("response", str(response))
             if response:
                 return str(response)
+
+        if agent_name == "trip_compliance":
+            verdict = data.get("verdict", "unknown")
+            labels = {
+                "compliant": "符合制度",
+                "non_compliant": "存在不合规项",
+                "partial": "部分项目待确认",
+                "unknown": "暂时无法确认",
+            }
+            parts = [f"🛡️ **合规检查：{labels.get(verdict, verdict)}**"]
+            if data.get("summary"):
+                parts.append(str(data["summary"]))
+            for check in data.get("checks", []):
+                if isinstance(check, dict):
+                    parts.append(f"  • {check.get('item', '检查项')}: {check.get('status', 'unknown')} — {check.get('reason', '')}")
+            if data.get("unknown_items"):
+                parts.append("📌 **待确认**")
+                parts.extend(f"  • {item}" for item in data["unknown_items"])
+            sources = data.get("sources") or []
+            if sources:
+                parts.append("📚 **制度来源**")
+                for source in sources:
+                    if not isinstance(source, dict):
+                        continue
+                    location = " · ".join(str(value) for value in (source.get("file"), source.get("section"), source.get("page") and f"第{source['page']}页") if value)
+                    parts.append(f"  • {location}")
+            return "\n".join(parts)
 
         # Fallback
         if data:

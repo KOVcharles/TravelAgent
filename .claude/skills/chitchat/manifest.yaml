@@ -1,0 +1,17 @@
+name: chitchat
+version: 1.0.0
+display_name: 简短交互
+description: 处理简短问候、感谢、告别和能力介绍，并将用户引导回公司差旅任务。
+category: interaction
+intent: chitchat
+agent_name: chitchat
+user_facing: false
+risk_level: low
+catalog_order: 90
+tools: []
+execution:
+  - skill: chitchat
+    agent_name: chitchat
+    priority: 1
+    reason: 处理简短礼貌交互
+    expected_output: 简短回复并引导回差旅能力

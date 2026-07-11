@@ -42,12 +42,15 @@ class EventCollectionAgent(AgentBase):
                 context = data.get("context", {})
                 user_query = context.get("rewritten_query", "") or str(data)
                 user_preferences = context.get("user_preferences", {})
+                active_trip = context.get("active_trip") or {}
             except json.JSONDecodeError:
                 user_query = content
                 user_preferences = {}
+                active_trip = {}
         else:
             user_query = str(content)
             user_preferences = {}
+            active_trip = {}
 
         # 构建用户背景信息
         background_info = ""
@@ -62,13 +65,16 @@ class EventCollectionAgent(AgentBase):
 
             if len(bg_parts) > 1:
                 background_info = "\n".join(bg_parts) + "\n\n"
+        if active_trip:
+            background_info += "【当前出差任务】（在此基础上增量更新）\n"
+            background_info += json.dumps(active_trip, ensure_ascii=False, indent=2) + "\n\n"
 
         # 获取当前时间
         from datetime import datetime
         current_date = datetime.now().strftime("%Y年%m月%d日")
         weekday = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"][datetime.now().weekday()]
 
-        prompt = f"""你是事项收集专家，负责提取旅行的基础信息。
+        prompt = f"""你是企业差旅事项收集专家，负责提取公司出差的基础信息。
 
 【当前时间】
 {current_date} {weekday}
@@ -85,6 +91,8 @@ class EventCollectionAgent(AgentBase):
 5. duration_days - 行程天数
 6. return_location - 返程地
 7. trip_purpose - 行程目的
+8. work_location - 会议、客户或工作地点
+9. work_schedule - 已知的会议或工作时间
 
 【日期处理规则】（重要）
 - 当前时间是{current_date}
@@ -93,9 +101,9 @@ class EventCollectionAgent(AgentBase):
 - 所有日期必须输出完整的YYYY-MM-DD格式
 
 【特殊处理】
-- 对于"北京一日游"这类：destination和origin都设为北京
-- 对于"一日游"：duration_days设为1
+- 不把公司差旅行程扩展为景点或私人旅游计划
 - 如果用户没说出发地，但有家庭住址信息，可推断出发地为家庭住址
+- 当前出差任务已有的字段应保留；用户本轮提供的新信息覆盖旧值
 
 【输出格式】(严格JSON)
 {{
@@ -105,10 +113,12 @@ class EventCollectionAgent(AgentBase):
     "end_date": "2026-02-27",
     "duration_days": 1,
     "return_location": "北京",
-    "trip_purpose": "旅游",
+    "trip_purpose": "客户会议",
+    "work_location": "南京市某客户办公室",
+    "work_schedule": "2026-02-27 14:00",
     "missing_info": [],
-    "extracted_count": 7,
-    "summary": "北京一日游，2月27日"
+    "extracted_count": 9,
+    "summary": "2月27日前往南京参加客户会议"
 }}
 
 缺失的信息在missing_info中列出，对应字段设为null。

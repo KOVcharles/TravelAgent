@@ -36,6 +36,7 @@ class FileLongTermMemory:
             "preferences": {},
             "chat_history": [],
             "trip_history": [],
+            "active_trip": None,
             "statistics": {
                 "total_trips": 0,
                 "total_messages": 0,
@@ -155,6 +156,23 @@ class FileLongTermMemory:
         if limit:
             rows = rows[-limit:]
         return [dict(row) for row in rows]
+
+    def upsert_active_trip(self, trip_info: Dict[str, Any]) -> Dict[str, Any]:
+        current = self.data.get("active_trip") or {}
+        merged = {**current, **{key: value for key, value in trip_info.items() if value is not None}}
+        merged["status"] = merged.get("status", "active")
+        merged["updated_at"] = _utc_now_iso()
+        self.data["active_trip"] = merged
+        self._save()
+        return dict(merged)
+
+    def get_active_trip(self) -> Optional[Dict[str, Any]]:
+        trip = self.data.get("active_trip")
+        return dict(trip) if isinstance(trip, dict) else None
+
+    def clear_active_trip(self) -> None:
+        self.data["active_trip"] = None
+        self._save()
 
     def get_frequent_destinations(self, top_n: int = 5) -> List[tuple]:
         stats = self.get_statistics()
@@ -289,6 +307,18 @@ class PostgresLongTermMemory:
                     total_queries INTEGER NOT NULL DEFAULT 0,
                     frequent_destinations JSONB NOT NULL DEFAULT '{}'::jsonb,
                     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                );
+                """
+            )
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS active_trip_contexts (
+                    user_id TEXT PRIMARY KEY,
+                    status TEXT NOT NULL DEFAULT 'active',
+                    context_data JSONB NOT NULL DEFAULT '{}'::jsonb,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    completed_at TIMESTAMPTZ
                 );
                 """
             )
@@ -536,6 +566,43 @@ class PostgresLongTermMemory:
             }
             for row in rows
         ]
+
+    def upsert_active_trip(self, trip_info: Dict[str, Any]) -> Dict[str, Any]:
+        current = self.get_active_trip() or {}
+        merged = {**current, **{key: value for key, value in trip_info.items() if value is not None}}
+        status = merged.get("status", "active")
+        with self.conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO active_trip_contexts (user_id, status, context_data, created_at, updated_at)
+                VALUES (%s, %s, %s, NOW(), NOW())
+                ON CONFLICT (user_id) DO UPDATE SET
+                    status = EXCLUDED.status,
+                    context_data = EXCLUDED.context_data,
+                    updated_at = NOW(),
+                    completed_at = CASE WHEN EXCLUDED.status = 'completed' THEN NOW() ELSE NULL END
+                """,
+                (self.user_id, status, self._jsonb(merged)),
+            )
+        return merged
+
+    def get_active_trip(self) -> Optional[Dict[str, Any]]:
+        with self.conn.cursor() as cur:
+            cur.execute(
+                "SELECT status, context_data, updated_at FROM active_trip_contexts WHERE user_id = %s",
+                (self.user_id,),
+            )
+            row = cur.fetchone()
+        if not row:
+            return None
+        data = dict(row["context_data"] or {})
+        data["status"] = row["status"]
+        data["updated_at"] = row["updated_at"].isoformat()
+        return data
+
+    def clear_active_trip(self) -> None:
+        with self.conn.cursor() as cur:
+            cur.execute("DELETE FROM active_trip_contexts WHERE user_id = %s", (self.user_id,))
 
     def get_frequent_destinations(self, top_n: int = 5) -> List[tuple]:
         """

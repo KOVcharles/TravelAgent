@@ -15,6 +15,10 @@ class ChatRequest(BaseModel):
     message: str
 
 
+class SkillToggleRequest(BaseModel):
+    enabled: bool
+
+
 class OnboardingPreferenceRequest(BaseModel):
     key: str
     value: str

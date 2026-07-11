@@ -59,10 +59,12 @@ def create_users_router(manager):
                 "member_level": "",
                 "member_tag": "",
                 "initialized": False,
+                "role": current_user.role,
             }
         try:
             summary = await instance.get_user_summary()
             summary["initialized"] = True
+            summary["role"] = current_user.role
             return summary
         except Exception as e:
             logger.error("Summary failed request_id=%s user_id=%s error=%s", request_id(request), user_id, sanitize_for_log(e))
@@ -73,6 +75,14 @@ def create_users_router(manager):
                 "member_level": "",
                 "member_tag": "",
                 "initialized": True,
+                "role": current_user.role,
             }
+
+    @router.get("/trip/active")
+    async def get_active_trip(user_id: str, current_user: User = Depends(require_path_user)):
+        instance = manager.get(user_id)
+        if not instance or not instance.initialized:
+            return {"active_trip": None}
+        return await instance.get_active_trip()
 
     return router

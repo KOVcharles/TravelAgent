@@ -22,4 +22,9 @@ def create_pages_router(render):
         """聊天主页面"""
         return render("chat.html", user_id=user_id)
 
+    @router.get("/admin/skills", response_class=HTMLResponse)
+    async def skill_admin_page():
+        """管理员 Skill 平台页面；数据 API 仍由 JWT 管理员权限保护。"""
+        return render("admin_skills.html")
+
     return router

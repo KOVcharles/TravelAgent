@@ -1,0 +1,18 @@
+name: mcp-tool
+version: 1.0.0
+display_name: MCP 工具适配器
+description: 供受授权的内部差旅流程调用 MCP 工具，不作为面向用户的通用文件或系统操作能力。
+category: capability
+intent: mcp_tool
+agent_name: mcp_tool
+user_facing: false
+enabled_by_default: false
+risk_level: high
+catalog_order: 100
+tools: [mcp]
+execution:
+  - skill: mcp-tool
+    agent_name: mcp_tool
+    priority: 1
+    reason: 执行受授权的内部 MCP 操作
+    expected_output: 结构化工具执行结果

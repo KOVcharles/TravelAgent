@@ -1,6 +1,6 @@
 # Hommey TravelAgent
 
-Hommey 是一个商旅助手项目，包含 FastAPI Web 界面、CLI、多智能体编排、记忆系统和 RAG 知识库。当前开发环境推荐使用 Docker Compose 启动，PostgreSQL 和 Redis 都已经在 compose 中配置好。
+Hommey 是一个面向企业差旅规划、制度问答和合规检查的智能 Agent，包含 FastAPI Web、声明式 Skill 平台、多智能体编排、当前出差任务、记忆系统和 RAG 知识库。CLI 仅保持兼容，后续开发以 Web 前后端为主。
 
 ## 当前状态
 
@@ -10,6 +10,7 @@ Hommey 是一个商旅助手项目，包含 FastAPI Web 界面、CLI、多智能
 - 缓存: Docker Redis，服务名 `hommey-redis`
 - RAG Embedding: 默认使用 SiliconFlow 云端 `BAAI/bge-m3`，不在 Docker 镜像中部署本地 BGE/PyTorch
 - 开发模式: 使用 `docker/docker-compose.dev.yml` 挂载当前源码到容器 `/app`
+- Skill 管理: 管理员访问 `http://127.0.0.1:8000/admin/skills`
 
 ## 快速启动
 
@@ -55,6 +56,7 @@ HOMMEY_MODEL_NAME=deepseek-v4-flash
 HOMMEY_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 
 HOMMEY_JWT_SECRET=replace-with-a-long-random-secret
+HOMMEY_ADMIN_EMAILS=admin@example.com
 PG_PASSWORD=replace-with-a-postgres-password
 
 HOMMEY_EMBEDDING_API_KEY=your-siliconflow-api-key
@@ -117,6 +119,23 @@ http://127.0.0.1:8000
 ```
 
 用刚创建的邮箱和密码登录。
+
+如需创建 Skill 管理员，请先在 `.env` 的 `HOMMEY_ADMIN_EMAILS` 中配置邮箱，再使用该邮箱注册。已有同邮箱用户会在 PostgreSQL 启动迁移时提升为管理员。
+
+## Skill 平台
+
+每个运行时 Skill 位于 `.claude/skills/<skill-name>/`：
+
+```text
+SKILL.md             精简的触发语义和工作流程
+manifest.yaml        版本、分类、工具权限、依赖和声明式执行计划
+script/agent.py      AgentScope 执行器
+schemas/             输入输出契约（需要时）
+references/          按需加载的证据和流程规则（需要时）
+agents/openai.yaml   Skill UI 元数据（新 Skill 推荐）
+```
+
+`manifest.yaml` 是意图目录、Agent 映射、执行顺序和管理页的单一数据源。管理员页面支持查看 Skill 详情、启用/停用、依赖图和脱敏执行轨迹。完整设计和升级说明见 [Skill 平台 v1 升级文档](docs/changelog/2026-07-11-skill-platform-v1.md)。
 
 ## 鉴权流程
 
@@ -250,10 +269,14 @@ webui_new/
   server.py              FastAPI 应用入口
   routes/                页面、鉴权、用户、聊天、onboarding 路由
   auth/                  用户存储、密码哈希、JWT、鉴权依赖
-  templates/             登录页和聊天页
+  skill_platform/        Skill 管理服务
+  templates/             登录页、聊天页和管理员 Skill 页面
   static/                前端脚本和静态资源
 
 agents/                  意图识别与多智能体编排
+.claude/skills/          声明式 Skill 包
+core/skill_manifest.py   Skill Manifest 强类型契约
+core/skill_store.py      Skill 启停和执行轨迹存储
 context/                 短期记忆和长期记忆
 rag/                     RAG 文档处理、向量检索
 docker/                  Dockerfile 和 compose 配置

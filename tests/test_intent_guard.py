@@ -32,14 +32,125 @@ def test_chitchat_routes_to_skill():
     assert _schedule_agents(route) == ["chitchat"]
 
 
-def test_clear_weather_query_routes_to_information_query():
+def test_weather_query_without_trip_context_does_not_fast_route():
     route = FastIntentRouter.route("帮我查一下明天东京天气")
 
+    assert route is None
+
+    result = can_call_information_query("帮我查一下明天东京天气", 0.9)
+    assert result.intent == "unclear"
+    assert result.should_call_skill is False
+    assert "出差" in result.clarification
+
+
+def test_weather_query_with_trip_context_routes_to_information_query():
+    route = FastIntentRouter.route("我明天去东京出差，帮我查一下天气")
+
     assert route is not None
-    data = route.to_intention_data("帮我查一下明天东京天气")
+    data = route.to_intention_data("我明天去东京出差，帮我查一下天气")
     assert data["routing"]["intent"] == "information_query"
     assert data["routing"]["should_call_skill"] is True
     assert _schedule_agents(route) == ["information_query"]
+
+
+def test_weather_followup_can_use_existing_business_trip_context():
+    result = can_call_information_query(
+        "那南京明天天气怎么样",
+        0.9,
+        "用户: 我下周要去南京出差",
+    )
+
+    assert result.intent == "information_query"
+    assert result.should_call_skill is True
+
+
+def test_intention_followup_uses_dialogue_context_instead_of_context_free_route():
+    model_calls = []
+
+    async def contextual_model(messages):
+        model_calls.append(messages)
+        return json.dumps(
+            {
+                "reasoning": "南京天气与上一轮公司出差相关",
+                "routing": {
+                    "intent": "information_query",
+                    "confidence": 0.92,
+                    "reason": "差旅目的地天气查询",
+                    "should_call_skill": True,
+                },
+                "intents": [
+                    {
+                        "type": "information_query",
+                        "confidence": 0.92,
+                        "description": "",
+                        "reason": "差旅目的地天气查询",
+                        "should_call_skill": True,
+                    }
+                ],
+                "key_entities": {"destination": "南京"},
+                "rewritten_query": "查询南京出差期间的天气",
+                "agent_schedule": [],
+            },
+            ensure_ascii=False,
+        )
+
+    agent = IntentionAgent(name="IntentionAgent", model=contextual_model)
+    result = asyncio.run(
+        agent.reply(
+            [
+                Msg(name="user", content="我下周要去南京出差", role="user"),
+                Msg(name="assistant", content="请告诉我具体日期", role="assistant"),
+                Msg(name="user", content="那边天气怎么样", role="user"),
+            ]
+        )
+    )
+    data = json.loads(result.content)
+
+    assert len(model_calls) == 1
+    assert data["routing"]["intent"] == "information_query"
+    assert data["routing"]["should_call_skill"] is True
+    assert data["agent_schedule"][0]["agent_name"] == "information_query"
+
+
+def test_programming_request_is_rejected_as_out_of_scope():
+    result = guard_user_input("帮我写一个 Python 程序")
+
+    assert result is not None
+    assert result.intent == "unsupported"
+    assert result.should_call_skill is False
+    assert "公司差旅" in result.clarification
+
+
+def test_private_tourism_request_is_rejected():
+    result = guard_user_input("帮我规划三亚蜜月旅游")
+
+    assert result is not None
+    assert result.intent == "unsupported"
+    assert result.should_call_skill is False
+
+
+def test_booking_payment_request_remains_advice_only():
+    result = guard_user_input("帮我订票付款")
+
+    assert result is not None
+    assert result.intent == "unsupported"
+    assert result.should_call_skill is False
+
+
+def test_payment_receipt_policy_question_is_not_mistaken_for_payment_action():
+    result = guard_user_input("报销需要提供支付明细吗")
+
+    assert result is None
+
+
+def test_private_tourism_is_rejected_even_after_business_trip_context():
+    result = guard_user_input(
+        "接下来帮我规划三亚蜜月旅游",
+        "用户: 我下周要去南京出差",
+    )
+
+    assert result is not None
+    assert result.intent == "unsupported"
 
 
 def test_trip_request_routes_to_trip_planning():
@@ -48,7 +159,9 @@ def test_trip_request_routes_to_trip_planning():
     assert route is not None
     data = route.to_intention_data("我下周去上海出差，帮我安排两天行程")
     assert data["routing"]["intent"] == "itinerary_planning"
-    assert _schedule_agents(route) == ["event_collection", "itinerary_planning"]
+    assert _schedule_agents(route) == [
+        "event_collection", "rag_knowledge", "itinerary_planning", "trip_compliance"
+    ]
 
 
 def test_policy_query_routes_to_rag_knowledge():
@@ -58,6 +171,25 @@ def test_policy_query_routes_to_rag_knowledge():
     data = route.to_intention_data("餐补标准是多少")
     assert data["routing"]["intent"] == "rag_knowledge"
     assert _schedule_agents(route) == ["rag_knowledge"]
+
+
+def test_generic_company_standard_does_not_enter_travel_rag_fast_path():
+    route = FastIntentRouter.route("公司的年假标准是什么")
+
+    assert route is None
+
+
+def test_compliance_request_routes_through_trip_context_rag_and_compliance():
+    route = FastIntentRouter.route("检查一下南京出差行程是否合规")
+
+    assert route is not None
+    data = route.to_intention_data("检查一下南京出差行程是否合规")
+    assert data["routing"]["intent"] == "trip_compliance"
+    assert _schedule_agents(route) == [
+        "event_collection",
+        "rag_knowledge",
+        "trip_compliance",
+    ]
 
 
 def test_vague_browse_input_is_unclear_without_skill():

@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>Hommey Skill 管理平台</title>
+    <style>
+        :root { color-scheme: light; --ink:#1d2a32; --muted:#71808a; --line:#dce3e6; --paper:#f4f1ea; --card:#fff; --accent:#b85c38; --green:#367b62; }
+        * { box-sizing:border-box; }
+        body { margin:0; font-family:Inter,"PingFang SC",sans-serif; color:var(--ink); background:var(--paper); }
+        header { display:flex; justify-content:space-between; align-items:center; padding:22px 32px; border-bottom:1px solid var(--line); background:#fffaf2; }
+        h1,h2,h3,p { margin:0; }
+        header p { color:var(--muted); margin-top:5px; }
+        header a { color:var(--ink); text-decoration:none; }
+        main { display:grid; grid-template-columns:minmax(300px,380px) 1fr; gap:20px; padding:24px; min-height:calc(100vh - 86px); }
+        .panel { background:var(--card); border:1px solid var(--line); border-radius:18px; padding:18px; box-shadow:0 8px 28px rgba(28,38,43,.05); }
+        .toolbar { display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; }
+        .skill-list { display:grid; gap:10px; max-height:calc(100vh - 170px); overflow:auto; }
+        .skill-card { border:1px solid var(--line); border-radius:13px; padding:13px; cursor:pointer; background:#fff; }
+        .skill-card:hover,.skill-card.active { border-color:var(--accent); background:#fff9f3; }
+        .skill-top { display:flex; justify-content:space-between; gap:10px; }
+        .meta,.empty { color:var(--muted); font-size:13px; margin-top:6px; }
+        .badge { border-radius:999px; padding:3px 8px; font-size:11px; background:#eef2f2; }
+        .badge.on { color:var(--green); background:#e8f4ef; }
+        .workspace { display:grid; gap:20px; align-content:start; }
+        .detail-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; margin:16px 0; }
+        .metric { background:#f7f8f7; border-radius:12px; padding:12px; }
+        .metric strong { display:block; margin-top:5px; }
+        pre { white-space:pre-wrap; word-break:break-word; background:#182229; color:#e8efef; border-radius:12px; padding:14px; max-height:280px; overflow:auto; }
+        .graph { min-height:250px; position:relative; overflow:auto; }
+        .graph-row { display:flex; gap:12px; align-items:center; margin:12px 0; flex-wrap:wrap; }
+        .node { padding:9px 12px; border:1px solid var(--line); border-radius:10px; background:#fff; font-size:13px; }
+        .arrow { color:var(--accent); }
+        .run { display:grid; grid-template-columns:1.3fr .8fr .7fr .7fr; gap:10px; padding:10px 0; border-bottom:1px solid var(--line); font-size:13px; }
+        button { border:0; border-radius:9px; padding:7px 10px; cursor:pointer; background:var(--ink); color:white; }
+        button.off { background:#a64b44; }
+        #error { color:#a33; padding:20px; }
+        @media(max-width:900px) { main { grid-template-columns:1fr; } .skill-list { max-height:none; } .detail-grid { grid-template-columns:1fr; } }
+    </style>
+</head>
+<body>
+<header>
+    <div><h1>Skill 管理平台</h1><p>Manifest、工具权限、依赖关系与脱敏执行轨迹</p></div>
+    <a href="/">退出管理</a>
+</header>
+<div id="error"></div>
+<main id="app" hidden>
+    <section class="panel">
+        <div class="toolbar"><h2>Skills</h2><span id="skillCount" class="badge"></span></div>
+        <div id="skillList" class="skill-list"></div>
+    </section>
+    <div class="workspace">
+        <section id="skillDetail" class="panel"><p class="empty">选择一个 Skill 查看详情。</p></section>
+        <section class="panel"><div class="toolbar"><h2>依赖图</h2><span class="meta">Manifest 驱动</span></div><div id="graph" class="graph"></div></section>
+        <section class="panel"><div class="toolbar"><h2>最近执行轨迹</h2><span class="meta">不保存完整对话</span></div><div id="runs"></div></section>
+    </div>
+</main>
+<script src="/static/admin_skills.js"></script>
+</body>
+</html>
