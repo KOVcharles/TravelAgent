@@ -9,6 +9,7 @@ from core.intent_guard import (
     GuardResult,
     can_call_information_query,
     guard_user_input,
+    has_business_travel_context,
     passes_confidence_gate,
 )
 from core.intent_catalog import CHITCHAT_EXACT, CHITCHAT_KEYWORDS
@@ -59,15 +60,20 @@ class FastIntentRouter:
     """Cheap high-confidence router for common user requests."""
 
     POLICY_KEYWORDS = (
-        "标准", "报销", "差旅政策", "住宿标准", "补贴", "流程",
+        "报销", "差旅政策", "住宿标准", "补贴",
         "餐补", "餐费", "餐饮", "饭补", "补助", "津贴",
         "住宿费", "交通费", "差旅费", "发票",
     )
+    GENERIC_POLICY_KEYWORDS = ("标准", "流程")
     WEATHER_KEYWORDS = ("天气", "气温", "下雨", "预报")
     SEARCH_KEYWORDS = ("查一下", "搜索", "查询", "了解一下")
-    MEMORY_KEYWORDS = ("我去过", "我的历史", "我之前", "上次", "我的偏好", "我喜欢去哪")
+    COMPLIANCE_KEYWORDS = ("合规", "符合标准", "检查行程", "行程检查", "是否超标")
+    MEMORY_KEYWORDS = ("我去过", "我的差旅", "差旅记录", "出差记录", "上次出差", "过去行程", "我的出行偏好")
     PREFERENCE_KEYWORDS = ("我喜欢", "我常坐", "我常住", "我住在", "我家在", "我偏好", "我习惯", "我不喜欢")
-    TRIP_KEYWORDS = ("我要去", "我想去", "帮我规划", "帮我安排", "规划行程", "安排行程", "从")
+    TRIP_KEYWORDS = (
+        "帮我规划", "帮我安排", "规划行程", "安排行程", "规划路线", "出行方案",
+        "怎么走最好", "路线怎么走", "从",
+    )
 
     @classmethod
     def route(cls, user_query: str) -> Optional[IntentRoute]:
@@ -117,9 +123,13 @@ class FastIntentRouter:
 
         candidates: List[IntentCandidate] = []
 
-        has_policy = any(keyword in q for keyword in cls.POLICY_KEYWORDS)
+        has_policy = any(keyword in q for keyword in cls.POLICY_KEYWORDS) or (
+            any(keyword in q for keyword in cls.GENERIC_POLICY_KEYWORDS)
+            and has_business_travel_context(q)
+        )
         has_weather = any(keyword in q for keyword in cls.WEATHER_KEYWORDS)
         has_search = any(keyword in q for keyword in cls.SEARCH_KEYWORDS)
+        has_compliance = any(keyword in q for keyword in cls.COMPLIANCE_KEYWORDS)
 
         if any(keyword in q for keyword in cls.MEMORY_KEYWORDS):
             candidates.append(IntentCandidate("memory_query", 0.9, "询问用户自己的历史或偏好记忆"))
@@ -129,6 +139,9 @@ class FastIntentRouter:
 
         if has_policy:
             candidates.append(IntentCandidate("rag_knowledge", 0.88, "查询差旅制度、标准或报销政策"))
+
+        if has_compliance:
+            candidates.append(IntentCandidate("trip_compliance", 0.9, "依据公司制度检查差旅行程合规性"))
 
         if has_weather:
             info_guard = can_call_information_query(q, 0.9)
@@ -140,7 +153,7 @@ class FastIntentRouter:
 
         # Generic search verbs like “查一下” should not turn policy/RAG queries
         # such as “查一下出差补贴” into an external information_query.
-        if has_search and not has_policy:
+        if has_search and not has_policy and not has_compliance:
             info_guard = can_call_information_query(q, 0.82)
             if info_guard.intent == "information_query" and info_guard.should_call_skill:
                 candidates.append(IntentCandidate("information_query", info_guard.confidence, info_guard.reason))
@@ -190,8 +203,10 @@ class FastIntentRouter:
 
     @classmethod
     def _looks_like_trip_request(cls, query: str) -> bool:
+        if not has_business_travel_context(query):
+            return False
         if any(keyword in query for keyword in cls.TRIP_KEYWORDS):
             if "从" in query and ("到" in query or "去" in query):
                 return True
-            return any(keyword in query for keyword in ("去", "规划", "行程", "出差", "旅游"))
+            return any(keyword in query for keyword in ("去", "规划", "安排", "行程", "路线", "出差", "差旅"))
         return False

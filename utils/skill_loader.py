@@ -4,6 +4,7 @@ from typing import Dict, Optional
 import yaml
 
 from settings import SKILL_CONFIG
+from core.skill_manifest import SkillManifest, load_skill_manifest
 
 
 class SkillLoader:
@@ -17,6 +18,7 @@ class SkillLoader:
             self.skills_dir = project_root / self.skills_dir
         self.skills_dir = self.skills_dir.resolve()
         self.skills: Dict[str, Dict] = {}
+        self.manifests: Dict[str, SkillManifest] = {}
 
     def load_skills(self) -> Dict[str, Dict]:
         if not self.skills_dir.exists():
@@ -38,6 +40,36 @@ class SkillLoader:
                 self.skills[skill_info.get("name", skill_path.name)] = skill_info
 
         return self.skills
+
+    def load_manifests(self, strict: bool = True) -> Dict[str, SkillManifest]:
+        """Load and validate every runtime manifest under the configured root."""
+        if not self.skills_dir.exists():
+            return {}
+
+        manifests: Dict[str, SkillManifest] = {}
+        errors = []
+        for skill_path in sorted(self.skills_dir.iterdir()):
+            if not skill_path.is_dir():
+                continue
+            manifest_path = skill_path / "manifest.yaml"
+            if not manifest_path.exists():
+                errors.append(f"Missing manifest.yaml: {skill_path.name}")
+                continue
+            try:
+                manifest = load_skill_manifest(manifest_path)
+                manifests[manifest.name] = manifest
+            except Exception as exc:
+                errors.append(f"{skill_path.name}: {exc}")
+
+        if errors and strict:
+            raise ValueError("Invalid skill manifests:\n- " + "\n- ".join(errors))
+        self.manifests = manifests
+        return manifests
+
+    def get_manifest(self, skill_name: str) -> Optional[SkillManifest]:
+        if not self.manifests:
+            self.load_manifests()
+        return self.manifests.get(skill_name)
 
     def _parse_skill_md(self, file_path: Path) -> Optional[Dict]:
         try:

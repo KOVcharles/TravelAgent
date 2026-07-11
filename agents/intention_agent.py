@@ -27,6 +27,8 @@ from core.intent_guard import (
     INFORMATION_QUERY_THRESHOLD,
     can_call_information_query,
     guard_user_input,
+    has_business_travel_context,
+    is_limited_chitchat,
     passes_confidence_gate,
 )
 from core.llm_response import extract_text_from_response
@@ -75,20 +77,25 @@ class IntentionAgent(AgentBase):
         else:
             user_query = x.content
 
-        guard_result = guard_user_input(user_query)
+        scope_context = "\n".join(self.conversation_history)
+        guard_result = guard_user_input(user_query, scope_context)
         if guard_result:
             result = self._apply_routing_guard(guard_result.to_intention_data(user_query), user_query)
             return Msg(name=self.name, content=json.dumps(result, ensure_ascii=False), role="assistant")
 
-        fast_candidates = FastIntentRouter.detect(user_query)
-        if fast_candidates:
-            result = self._result_from_candidates(fast_candidates, user_query)
-            return Msg(name=self.name, content=json.dumps(result, ensure_ascii=False), role="assistant")
+        # A follow-up such as "补贴呢" or "怎么走最好" must be resolved
+        # against the active trip in dialogue history. Fast routing is safe
+        # only for the first, self-contained request.
+        if not self.conversation_history:
+            fast_candidates = FastIntentRouter.detect(user_query)
+            if fast_candidates:
+                result = self._result_from_candidates(fast_candidates, user_query)
+                return Msg(name=self.name, content=json.dumps(result, ensure_ascii=False), role="assistant")
 
-        fast_route = FastIntentRouter.route(user_query)
-        if fast_route:
-            result = self._apply_routing_guard(fast_route.to_intention_data(user_query), user_query)
-            return Msg(name=self.name, content=json.dumps(result, ensure_ascii=False), role="assistant")
+            fast_route = FastIntentRouter.route(user_query)
+            if fast_route:
+                result = self._apply_routing_guard(fast_route.to_intention_data(user_query), user_query)
+                return Msg(name=self.name, content=json.dumps(result, ensure_ascii=False), role="assistant")
 
         # 构建上下文
         # 策略：长期记忆始终保留，短期对话全部保留（已在 cli.py 控制数量）
@@ -134,11 +141,20 @@ class IntentionAgent(AgentBase):
 【意图类型（intent ↔ skill 1:1，agent_schedule 的 agent_name 用意图名）】
 {intent_list}
 
+【产品边界】
+你服务于公司员工的差旅规划、差旅制度查询和报销准备。
+- 明确属于公司差旅的政策、补贴、路线、交通、住宿、天气、行程和报销问题可以处理。
+- 天气、航班、铁路、酒店等外部信息，只有与当前或对话中的差旅行程相关时才使用 information_query。
+- 私人旅游、编程、作业、创作、娱乐、投资等领域外请求必须识别为 unsupported，不调用任何 skill。
+- 仅提供建议，不执行预订、付款、审批或报销提交；相关操作识别为 unsupported。
+- 简短问候、感谢、告别和能力介绍可以使用 chitchat；不要进行开放式闲聊或情绪陪伴。
+
 【意图区分原则 - 基于语义而非关键词】
 同一个词在不同语境下对应不同意图：
 - "我去过北京吗？" → memory_query（询问自己的历史）
-- "北京怎么样？" / "北京有什么好玩的？" → information_query（询问客观信息）
-- "我想去北京" → itinerary_planning（规划未来行程）
+- "下周去北京出差，那边天气怎么样？" → information_query（差旅相关外部信息）
+- "帮我规划去北京出差的路线" → itinerary_planning（公司差旅行程）
+- "北京有什么好玩的？" → unsupported（私人旅游/泛城市信息）
 - "差旅住宿标准是多少" → rag_knowledge（企业制度/政策）
 当问题涉及"我的/我之前/我去过"等用户自身历史时，必须优先 memory_query，优先级高于 information_query。
 
@@ -148,7 +164,7 @@ class IntentionAgent(AgentBase):
 - priority 数字相同的智能体会并行执行；不同 priority 按顺序批次执行，Priority 2 会使用 Priority 1 的结果。
 - 查询"我的/我之前/我去过"优先 memory_query；差旅标准、报销、政策优先 rag_knowledge。
 - confidence 低于 {DEFAULT_CONFIDENCE_THRESHOLD:.2f} 时不要调用 skill（agent_schedule 置空）。
-- information_query 仅用于明确查询外部事实、实时信息、地点信息、天气、航班、交通、景点、价格等，confidence 至少 {INFORMATION_QUERY_THRESHOLD:.2f}，且查询对象明确。
+- information_query 仅用于与差旅行程直接相关的天气、航班、铁路、酒店和交通信息，confidence 至少 {INFORMATION_QUERY_THRESHOLD:.2f}，且查询对象明确。
 - 禁止将短输入、寒暄、半句话、无明确查询对象的问题识别为 information_query。
 - 寒暄类（chitchat）调用 chitchat skill，priority=1；unclear、unsupported 的 agent_schedule 必须为空。
 
@@ -159,9 +175,11 @@ class IntentionAgent(AgentBase):
 - "你?" → unclear, should_call_skill=false, agent_schedule=[]
 - "这个呢" → unclear, should_call_skill=false, agent_schedule=[]
 - "在吗" → chitchat, should_call_skill=true, agent_schedule=[chitchat]
-- "帮我查明天东京天气" → information_query, should_call_skill=true, agent_schedule=[information_query]
+- "帮我查明天东京天气" → unclear, should_call_skill=false, agent_schedule=[]（缺少差旅上下文）
+- "我明天去东京出差，帮我查天气" → information_query, should_call_skill=true, agent_schedule=[information_query]
 - "餐补标准是多少" → rag_knowledge, should_call_skill=true, agent_schedule=[rag_knowledge]
 - "我下周去上海出差，帮我安排两天行程" → event_collection(priority=1) + itinerary_planning(priority=2)
+- "帮我写一个 Python 程序" → unsupported, should_call_skill=false, agent_schedule=[]
 
 【输出 JSON schema（严格按此结构，key 不要少也不要多）】
 {{
@@ -243,7 +261,12 @@ class IntentionAgent(AgentBase):
             confidence = float(item.get("confidence") or 0.0)
             item["type"] = intent_type
             item["confidence"] = confidence
-            item["should_call_skill"] = self._should_call_intent(user_query, intent_type, confidence)
+            item["should_call_skill"] = self._should_call_intent(
+                user_query,
+                intent_type,
+                confidence,
+                "\n".join(self.conversation_history),
+            )
             if item["should_call_skill"]:
                 callable_intents.append(item)
 
@@ -274,7 +297,7 @@ class IntentionAgent(AgentBase):
             }
             result.setdefault(
                 "clarification",
-                "我还不太确定你的意思。你可以再明确一下要查政策、规划行程，还是查询某个旅行信息吗？",
+                "我还不太确定这是否与公司差旅有关。你可以补充出差目的地、日期，或说明要查询的差旅政策和报销问题。",
             )
 
         return result
@@ -311,10 +334,11 @@ class IntentionAgent(AgentBase):
             "itinerary_planning": 0,
             "information_query": 1,
             "rag_knowledge": 2,
-            "preference": 3,
-            "memory_query": 4,
-            "event_collection": 5,
-            "chitchat": 6,
+            "trip_compliance": 3,
+            "preference": 4,
+            "memory_query": 5,
+            "event_collection": 6,
+            "chitchat": 7,
         }
         def sort_key(item: dict):
             intent_type = item.get("type") or ""
@@ -323,10 +347,23 @@ class IntentionAgent(AgentBase):
 
         return min(callable_intents, key=sort_key)
 
-    def _should_call_intent(self, user_query: str, intent_type: str, confidence: float) -> bool:
+    def _should_call_intent(
+        self,
+        user_query: str,
+        intent_type: str,
+        confidence: float,
+        conversation_context: str = "",
+    ) -> bool:
         if intent_type in {"unclear", "unsupported", "fallback"}:
             return False
+        if intent_type == "chitchat":
+            return is_limited_chitchat(user_query) and passes_confidence_gate(intent_type, confidence)
         if intent_type == "information_query":
-            info_guard = can_call_information_query(user_query, confidence)
+            info_guard = can_call_information_query(user_query, confidence, conversation_context)
             return info_guard.intent == "information_query" and info_guard.should_call_skill
+        if intent_type in {
+            "rag_knowledge", "itinerary_planning", "trip_compliance", "event_collection",
+            "preference", "memory_query",
+        } and not has_business_travel_context(user_query, conversation_context):
+            return False
         return passes_confidence_gate(intent_type, confidence)

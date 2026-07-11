@@ -225,7 +225,7 @@ class MemoryQueryAgent(AgentBase):
             destination = trip.get("destination", "未知")
             start_date = trip.get("start_date", "")
             end_date = trip.get("end_date", "")
-            purpose = trip.get("purpose", "旅游")
+            purpose = trip.get("purpose", "公司出差")
             timestamp = trip.get("timestamp", "")
 
             if start_date and end_date:

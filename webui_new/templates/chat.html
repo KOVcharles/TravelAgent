@@ -400,6 +400,11 @@
         .panel-quick {
             padding: 0 20px 20px;
         }
+        .trip-card { margin-top:16px; padding:14px; border:1px solid var(--line); border-radius:14px; background:rgba(255,255,255,.72); }
+        .trip-card h3 { margin:0 0 8px; font-size:15px; }
+        .trip-row { display:flex; justify-content:space-between; gap:12px; padding:5px 0; font-size:13px; }
+        .trip-row span:first-child { color:var(--muted); }
+        .admin-link { display:none; color:inherit; text-decoration:none; font-size:13px; margin-right:8px; }
         .quick-grid {
             display: grid;
             grid-template-columns: 1fr 1fr;
@@ -509,6 +514,7 @@
                     <p>把复杂差旅整理成一张安静的计划。</p>
                 </div>
                 <div class="header-actions">
+                    <a id="adminLink" class="admin-link" href="/admin/skills">Skill 管理</a>
                     <div class="user-chip">
                         <span class="user-dot">{{ user_id[0:1].upper() if user_id else 'U' }}</span>
                         <span>{{ user_id }}</span>
@@ -549,6 +555,10 @@
                 <p id="panelLevel" class="panel-level">加载中...</p>
                 <div id="prefList">
                     <div class="empty-state">正在读取你的偏好。</div>
+                </div>
+                <div class="trip-card">
+                    <h3>当前出差任务</h3>
+                    <div id="activeTrip"><div class="empty-state">尚未创建当前出差任务。</div></div>
                 </div>
             </div>
             <div class="panel-quick">

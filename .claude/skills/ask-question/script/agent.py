@@ -111,6 +111,7 @@ class RAGKnowledgeAgent(AgentBase):
                 "query": user_query,
                 "answer": answer,
                 "retrieved_documents": [self._serialize_doc(doc) for doc in retrieved_docs],
+                "sources": [self._serialize_source(doc) for doc in retrieved_docs],
             }
         )
 
@@ -329,6 +330,14 @@ class RAGKnowledgeAgent(AgentBase):
         return {
             "content": content[:200] + "..." if len(content) > 200 else content,
             "metadata": doc.get("metadata", {}),
+        }
+
+    def _serialize_source(self, doc: Dict[str, Any]) -> Dict[str, Any]:
+        metadata = doc.get("metadata") if isinstance(doc.get("metadata"), dict) else {}
+        return {
+            "file": metadata.get("source") or metadata.get("file_name") or metadata.get("filename") or "企业差旅知识库",
+            "page": metadata.get("page") or metadata.get("page_number"),
+            "section": metadata.get("section") or metadata.get("title"),
         }
 
     def _msg(self, content: Dict[str, Any]) -> Msg:

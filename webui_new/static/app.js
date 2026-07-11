@@ -14,6 +14,8 @@
     const panelName = document.getElementById('panelName');
     const panelLevel = document.getElementById('panelLevel');
     const prefList = document.getElementById('prefList');
+    const activeTrip = document.getElementById('activeTrip');
+    const adminLink = document.getElementById('adminLink');
 
     const assistantImage = '/static/assets/hommey-avatar.jpg';
     const defaultPlaceholder = '告诉 Hommey 你的出行需求，例如：下周一去上海出差两天';
@@ -88,6 +90,7 @@
             }
 
             await loadUserSummary();
+            await loadActiveTrip();
             hideInitOverlay();
             setInputEnabled(true);
 
@@ -144,6 +147,7 @@
     async function loadUserSummary() {
         try {
             const data = await fetchJson(`/api/${encodeURIComponent(userId)}/summary`);
+            if (adminLink) adminLink.style.display = data.role === 'admin' ? 'inline-block' : 'none';
             panelName.textContent = `您好，${data.name_display || userId}`;
             panelLevel.textContent = data.member_level
                 ? `${data.member_level} · ${data.member_tag || '差旅常客'}`
@@ -177,6 +181,33 @@
         } catch (err) {
             console.error('Load summary error:', err);
         }
+    }
+
+    async function loadActiveTrip() {
+        if (!activeTrip) return;
+        try {
+            const data = await fetchJson(`/api/${encodeURIComponent(userId)}/trip/active`);
+            const trip = data.active_trip;
+            activeTrip.replaceChildren();
+            if (!trip) {
+                const empty = document.createElement('div'); empty.className = 'empty-state'; empty.textContent = '尚未创建当前出差任务。'; activeTrip.appendChild(empty); return;
+            }
+            const fields = [
+                ['目的地', trip.destination], ['出发地', trip.origin],
+                ['出发日期', trip.start_date], ['返程日期', trip.end_date],
+                ['工作地点', trip.work_location], ['状态', trip.status || 'active'],
+            ];
+            fields.filter(([, value]) => value).forEach(([label, value]) => {
+                const row=document.createElement('div'); row.className='trip-row';
+                const key=document.createElement('span'); key.textContent=label;
+                const val=document.createElement('span'); val.textContent=String(value);
+                row.append(key,val); activeTrip.appendChild(row);
+            });
+            const missing = Array.isArray(trip.missing_info) ? trip.missing_info : [];
+            if (missing.length) {
+                const row=document.createElement('div'); row.className='meta'; row.textContent=`待补充：${missing.join('、')}`; activeTrip.appendChild(row);
+            }
+        } catch (err) { console.error('Load active trip error:', err); }
     }
 
     function startOnboarding() {
@@ -369,6 +400,7 @@
             else addMessage('ai', '我收到了，但这次没有返回具体内容。');
 
             if (preferencesUpdated) await loadUserSummary();
+            await loadActiveTrip();
         } catch (err) {
             removeProcessingIndicator();
             addMessage('ai', formatDisplayError(err, '网络错误，请检查连接后重试。'));

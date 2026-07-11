@@ -496,7 +496,7 @@ class InformationQueryAgent(AgentBase):
         if not skill_instruction:
             skill_instruction = "请直接回答用户的问题，保持简洁。"
 
-        prompt = f"""根据以下搜索结果，简洁地回答用户的问题。
+        prompt = f"""根据以下公开搜索结果，为公司差旅行程提供简洁建议。
 
 【当前时间】
 {current_date} {weekday}
@@ -510,6 +510,11 @@ class InformationQueryAgent(AgentBase):
 
 【任务说明】
 {skill_instruction}
+
+【可靠性要求】
+- 搜索摘要不能证明实时余票、实时价格或可以预订。
+- 涉及车次、航班、票价或时刻时，提醒用户在铁路、航司或授权差旅平台最终核验。
+- 只能提供建议，不得声称已经预订、付款或提交审批。
 """
 
         try:

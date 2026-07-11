@@ -54,6 +54,7 @@ def _row(**overrides):
         "email": "alice@example.com",
         "password_hash": "BCRYPT_HASH_VALUE",  # 假哈希；明文密码从不落库
         "created_at": "2026-01-01T00:00:00+00:00",
+        "role": "user",
     }
     base.update(overrides)
     return base
@@ -89,12 +90,13 @@ def test_create_user_inserts_hashed_password_and_returns_user():
     assert isinstance(user, User)
     assert user.id == 42
     assert user.email == "bob@example.com"
+    assert user.role == "user"
 
     sql, params = conn.executed[0]
     assert "INSERT INTO users" in sql
     assert "RETURNING" in sql
-    # 参数只含 email 与 hash，绝不含明文密码。
-    assert params == ("bob@example.com", "BCRYPT_HASH_VALUE")
+    # 参数只含 email、hash 与受控角色，绝不含明文密码。
+    assert params == ("bob@example.com", "BCRYPT_HASH_VALUE", "user")
     assert _PLAINTEXT not in params
 
 

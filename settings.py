@@ -165,4 +165,9 @@ AUTH_CONFIG = {
     "jwt_algorithm": os.getenv("HOMMEY_JWT_ALGO", "HS256"),
     "access_expire_minutes": _int_env("HOMMEY_JWT_ACCESS_EXPIRE_MINUTES", 30),
     "refresh_expire_days": _int_env("HOMMEY_JWT_REFRESH_EXPIRE_DAYS", 7),
+    "admin_emails": tuple(
+        email.strip().lower()
+        for email in os.getenv("HOMMEY_ADMIN_EMAILS", "").split(",")
+        if email.strip()
+    ),
 }

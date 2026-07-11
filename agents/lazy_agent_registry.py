@@ -22,17 +22,6 @@ from settings import SKILL_CONFIG
 class LazyAgentRegistry:
     """Discover skill plugins and instantiate their AgentBase subclasses on use."""
 
-    _legacy_mapping = {
-        "rag_knowledge": "ask-question",
-        "memory_query": "memory-query",
-        "preference": "preference",
-        "information_query": "query-info",
-        "itinerary_planning": "plan-trip",
-        "event_collection": "event-collection",
-        "chitchat": "chitchat",
-        "mcp_tool": "mcp-tool",
-    }
-
     def __init__(
         self,
         model,
@@ -55,6 +44,7 @@ class LazyAgentRegistry:
         self.skills_root = self.skills_root.resolve()
 
         self._skill_map: Dict[str, Path] = {}
+        self._agent_to_skill: Dict[str, str] = {}
         self._discover_skills()
 
     def _discover_skills(self) -> None:
@@ -64,19 +54,20 @@ class LazyAgentRegistry:
             )
             return
 
-        for skill_dir in sorted(self.skills_root.iterdir()):
-            if not skill_dir.is_dir():
-                continue
+        from utils.skill_loader import SkillLoader
 
-            agent_script = skill_dir / "script" / "agent.py"
-            if agent_script.exists():
-                self._skill_map[skill_dir.name] = agent_script
+        loader = SkillLoader(str(self.skills_root))
+        for skill_name, manifest in loader.load_manifests().items():
+            agent_script = self.skills_root / skill_name / manifest.entrypoint
+            if manifest.agent_name and agent_script.exists():
+                self._skill_map[skill_name] = agent_script
+                self._agent_to_skill[manifest.agent_name] = skill_name
 
     def _resolve_agent_name(self, agent_name: str) -> Optional[str]:
         if agent_name in self._skill_map:
             return agent_name
 
-        skill_name = self._legacy_mapping.get(agent_name)
+        skill_name = self._agent_to_skill.get(agent_name)
         if skill_name and skill_name in self._skill_map:
             return skill_name
 
@@ -152,10 +143,13 @@ class LazyAgentRegistry:
 
     def keys(self):
         keys = set(self._skill_map.keys())
-        for legacy_key, skill_name in self._legacy_mapping.items():
-            if skill_name in self._skill_map:
-                keys.add(legacy_key)
+        keys.update(self._agent_to_skill)
         return sorted(keys)
+
+    def skill_name_for_agent(self, agent_name: str) -> Optional[str]:
+        if agent_name in self._skill_map:
+            return agent_name
+        return self._agent_to_skill.get(agent_name)
 
     def values(self):
         return self.cache.values()

@@ -14,6 +14,7 @@ from settings import LLM_CONFIG, RESILIENCE_CONFIG, SYSTEM_CONFIG
 from config_agentscope import init_agentscope
 from context.memory_manager import MemoryManager
 from utils.circuit_breaker import CircuitBreaker
+from core.skill_store import SkillPlatformStore
 
 
 @dataclass
@@ -72,6 +73,7 @@ def create_agent_runtime(
         name="OrchestrationAgent",
         agent_registry=agent_registry,
         memory_manager=memory_manager,
+        skill_store=SkillPlatformStore(),
     )
 
     return AgentRuntime(

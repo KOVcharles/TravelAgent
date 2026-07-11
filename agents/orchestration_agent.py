@@ -20,6 +20,10 @@ import json
 import logging
 import asyncio
 import time
+import uuid
+
+from core.skill_store import SkillPlatformStore
+from utils.skill_loader import SkillLoader
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +36,7 @@ class OrchestrationAgent(AgentBase):
         name: str = "OrchestrationAgent",
         agent_registry: Dict[str, AgentBase] = None,
         memory_manager = None,
+        skill_store: SkillPlatformStore = None,
         **kwargs
     ):
         """
@@ -46,6 +51,13 @@ class OrchestrationAgent(AgentBase):
         self.name = name
         self.agent_registry = agent_registry or {}
         self.memory_manager = memory_manager
+        self.skill_store = skill_store or SkillPlatformStore()
+        self.skill_manifests = SkillLoader().load_manifests()
+        self._agent_skill_map = {
+            manifest.agent_name: manifest.name
+            for manifest in self.skill_manifests.values()
+            if manifest.agent_name
+        }
 
     def register_agent(self, agent_name: str, agent: AgentBase):
         """注册子智能体"""
@@ -108,13 +120,17 @@ class OrchestrationAgent(AgentBase):
 
         # 获取智能体调度计划
         agent_schedule = intention_data.get("agent_schedule", [])
+        agent_schedule, disabled_skills = self._filter_enabled_schedule(agent_schedule)
         if not agent_schedule:
             return Msg(
                 name=self.name,
                 content=json.dumps({
                     "status": "no_agents",
-                    "message": "没有需要调度的智能体"
-                }),
+                    "message": (
+                        f"相关能力当前已停用：{', '.join(disabled_skills)}"
+                        if disabled_skills else "没有需要调度的智能体"
+                    )
+                }, ensure_ascii=False),
                 role="assistant"
             )
 
@@ -157,6 +173,8 @@ class OrchestrationAgent(AgentBase):
         if self.memory_manager:
             self._update_memory(intention_data, results)
 
+        self._record_skill_runs(intention_data, results)
+
         return Msg(
             name=self.name,
             content=json.dumps(final_result, ensure_ascii=False),
@@ -189,8 +207,55 @@ class OrchestrationAgent(AgentBase):
             # 长期记忆：用户偏好
             preferences = self.memory_manager.long_term.get_preference()
             context["user_preferences"] = preferences
+            context["active_trip"] = self.memory_manager.get_active_trip()
 
         return context
+
+    def _filter_enabled_schedule(self, schedule: List[Dict[str, Any]]):
+        enabled = []
+        disabled = []
+        for task in schedule:
+            skill_name = self._agent_skill_map.get(task.get("agent_name"))
+            manifest = self.skill_manifests.get(skill_name) if skill_name else None
+            default = manifest.enabled_by_default if manifest else True
+            if skill_name and not self.skill_store.is_enabled(skill_name, default):
+                disabled.append(skill_name)
+                continue
+            enabled.append(task)
+        return enabled, disabled
+
+    def _record_skill_runs(self, intention_data: Dict[str, Any], results: List[Dict]) -> None:
+        if not self.skill_store.configured:
+            return
+        request_id = str(uuid.uuid4())
+        user_id = str(getattr(self.memory_manager, "user_id", "unknown"))
+        input_summary = {
+            "intents": [item.get("type") for item in intention_data.get("intents", [])],
+            "entities": intention_data.get("key_entities", {}),
+        }
+        for result in results:
+            agent_name = result.get("agent_name")
+            skill_name = self._agent_skill_map.get(agent_name)
+            manifest = self.skill_manifests.get(skill_name) if skill_name else None
+            if not manifest:
+                continue
+            runtime_result = result.get("result") or {}
+            data = runtime_result.get("data") if isinstance(runtime_result, dict) else {}
+            evidence = []
+            if isinstance(data, dict):
+                evidence = data.get("retrieved_documents") or data.get("sources") or []
+            self.skill_store.record_run(
+                request_id=request_id,
+                user_id=user_id,
+                skill_name=skill_name,
+                skill_version=manifest.version,
+                status=runtime_result.get("status", "unknown"),
+                duration_ms=int(float(runtime_result.get("duration_sec") or 0) * 1000),
+                input_summary=input_summary,
+                output_summary={"agent": agent_name, "status": runtime_result.get("status", "unknown")},
+                evidence_count=len(evidence) if isinstance(evidence, list) else 0,
+                error_code="AGENT_ERROR" if runtime_result.get("status") == "error" else None,
+            )
 
     async def _execute_parallel_agents(
         self,
@@ -423,8 +488,11 @@ class OrchestrationAgent(AgentBase):
 
     def _message_for_non_skill_intent(self, intent: str) -> str:
         if intent == "unsupported":
-            return "这个请求我目前不支持。可以帮你处理差旅政策、行程规划或旅行信息查询。"
-        return "我还不太确定你的意思。你可以再明确一下要查政策、规划行程，还是查询某个旅行信息吗？"
+            return (
+                "这个问题不属于公司差旅规划或报销范围，我暂时无法处理。"
+                "我可以帮你查询差旅政策、规划出差路线，或准备报销材料。"
+            )
+        return "我还不太确定这是否与公司差旅有关。请补充出差目的地、日期，或说明要查询的政策和报销问题。"
 
     def _update_memory(self, intention_data: Dict[str, Any], results: List[Dict]):
         """
@@ -441,6 +509,11 @@ class OrchestrationAgent(AgentBase):
         for result in results:
             agent_name = result["agent_name"]
             data = result["result"].get("data", {})
+
+            if agent_name == "event_collection" and isinstance(data, dict):
+                event_data = data.get("data") if isinstance(data.get("data"), dict) else data
+                if any(event_data.get(key) for key in ("origin", "destination", "start_date", "end_date", "work_location")):
+                    self.memory_manager.update_active_trip(event_data)
 
             # 如果是偏好智能体，保存偏好信息到长期记忆
             if agent_name == "preference" and isinstance(data, dict):
@@ -507,7 +580,7 @@ class OrchestrationAgent(AgentBase):
                     destination = event_data.get("destination")
                     start_date = event_data.get("start_date")
                     end_date = event_data.get("end_date")
-                    purpose = event_data.get("trip_purpose", "旅游")
+                    purpose = event_data.get("trip_purpose", "公司出差")
 
                     # 保存到长期记忆（只要有目的地就保存）
                     if destination:

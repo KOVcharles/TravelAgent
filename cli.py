@@ -239,7 +239,8 @@ class HommeyCLI:
         with self.console.status("思考中...", spinner="dots"):
             from agentscope.message import Msg
 
-            fast_route = FastIntentRouter.route(user_input)
+            recent_for_routing = self.memory_manager.short_term.get_recent_context(n_turns=1)
+            fast_route = None if recent_for_routing else FastIntentRouter.route(user_input)
             fast_agent = None
             if fast_route and len(fast_route.agent_schedule) == 1:
                 fast_agent = fast_route.agent_schedule[0].get("agent_name")

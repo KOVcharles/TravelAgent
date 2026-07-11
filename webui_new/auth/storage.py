@@ -13,7 +13,7 @@
 from contextlib import contextmanager
 from dataclasses import dataclass
 
-from settings import MEMORY_CONFIG
+from settings import AUTH_CONFIG, MEMORY_CONFIG
 from webui_new.core.errors import ConfigError
 
 
@@ -34,6 +34,7 @@ class User:
     email: str
     password_hash: str  # bcrypt 哈希；仅用于登录校验，不外泄、不落日志
     created_at: str  # TIMESTAMPTZ → ISO 字符串
+    role: str = "user"
 
 
 @contextmanager
@@ -64,13 +65,14 @@ _USERS_DDL = (
     " id            BIGSERIAL    PRIMARY KEY,"
     " email         TEXT         UNIQUE NOT NULL,"
     " password_hash TEXT         NOT NULL,"
+    " role          TEXT         NOT NULL DEFAULT 'user',"
     " created_at    TIMESTAMPTZ  NOT NULL DEFAULT now()"
     ")"
 )
 
 # 含 password_hash：登录需读出哈希做常量时间校验（design.md §3.8），
 # 故 email/id 两条查询路径都带回它；明文密码从不落库，自然不会出现在列里。
-_USER_COLUMNS = "id, email, password_hash, created_at"
+_USER_COLUMNS = "id, email, password_hash, created_at, role"
 
 
 def apply_migration(conn) -> None:
@@ -87,6 +89,7 @@ def _row_to_user(row: dict | None) -> User | None:
         email=row["email"],
         password_hash=row["password_hash"],
         created_at=row["created_at"],
+        role=row.get("role", "user"),
     )
 
 
@@ -96,12 +99,13 @@ def create_user(conn, email: str, password_hash: str) -> User:
     重复 email 由 route 层预先 `get_user_by_email` 判重映射为 409
     （`EMAIL_ALREADY_EXISTS`）；本函数假设 email 尚未占用。
     """
+    role = "admin" if email.strip().lower() in AUTH_CONFIG.get("admin_emails", ()) else "user"
     sql = (
-        "INSERT INTO users (email, password_hash) VALUES (%s, %s)"
+        "INSERT INTO users (email, password_hash, role) VALUES (%s, %s, %s)"
         f" RETURNING {_USER_COLUMNS}"
     )
     with conn.cursor() as cur:
-        cur.execute(sql, (email, password_hash))
+        cur.execute(sql, (email, password_hash, role))
         row = cur.fetchone()
     return _row_to_user(row)
 

@@ -12,6 +12,7 @@ Hommey 商旅助手 - FastAPI Web 服务入口
 """
 import os
 import sys
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse, PlainTextResponse
@@ -21,7 +22,7 @@ from jinja2 import Environment, FileSystemLoader
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, project_root)
 
-from settings import SYSTEM_CONFIG
+from settings import MEMORY_CONFIG, SYSTEM_CONFIG
 from utils.observability import render_metrics
 from utils.preflight import run_preflight
 from utils.structured_logging import configure_logging
@@ -32,12 +33,23 @@ from webui_new.routes.chat import create_chat_router
 from webui_new.routes.onboarding import create_onboarding_router
 from webui_new.routes.pages import create_pages_router
 from webui_new.routes.users import create_users_router
+from webui_new.auth.migrations import apply_all_migrations
+from webui_new.routes.skill_admin import create_skill_admin_router
+from webui_new.skill_platform import SkillPlatformService
 
 
 configure_logging()
 
-app = FastAPI(title="Hommey 商旅助手", version="2.0.0")
+@asynccontextmanager
+async def lifespan(_app):
+    if MEMORY_CONFIG.get("long_term", {}).get("backend") == "postgres":
+        apply_all_migrations()
+    yield
+
+
+app = FastAPI(title="Hommey 商旅助手", version="3.0.0", lifespan=lifespan)
 manager = WebHommeyManager()
+skill_platform = SkillPlatformService()
 
 static_dir = os.path.join(os.path.dirname(__file__), "static")
 templates_dir = os.path.join(os.path.dirname(__file__), "templates")
@@ -61,6 +73,7 @@ app.include_router(create_auth_router())
 app.include_router(create_users_router(manager))
 app.include_router(create_onboarding_router(manager))
 app.include_router(create_chat_router(manager))
+app.include_router(create_skill_admin_router(skill_platform))
 
 
 @app.get("/healthz")

@@ -4,6 +4,7 @@ from utils.skill_loader import SkillLoader
 
 EXPECTED_SKILLS = {
     "ask-question",
+    "check-trip-compliance",
     "chitchat",
     "event-collection",
     "mcp-tool",
@@ -16,6 +17,7 @@ EXPECTED_SKILLS = {
 
 EXPECTED_LEGACY_AGENT_NAMES = {
     "rag_knowledge",
+    "trip_compliance",
     "memory_query",
     "preference",
     "information_query",

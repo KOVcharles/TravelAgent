@@ -68,7 +68,9 @@ def test_trip_only_routes_to_event_collection_then_itinerary_planning():
     assert _intent_types(data) == {"itinerary_planning"}
     assert _schedule(data) == [
         ("event_collection", 1),
+        ("rag_knowledge", 1),
         ("itinerary_planning", 2),
+        ("trip_compliance", 3),
     ]
 
 
@@ -110,8 +112,12 @@ def test_low_confidence_intent_is_filtered_per_intent():
 
     assert data["intents"][0]["should_call_skill"] is True
     assert data["intents"][1]["should_call_skill"] is False
-    assert ("rag_knowledge", 1) not in _schedule(data)
+    # The explicit low-confidence RAG intent is filtered, while the validated
+    # plan-trip workflow still declares policy retrieval as a required step.
+    assert ("rag_knowledge", 1) in _schedule(data)
     assert _schedule(data) == [
         ("event_collection", 1),
+        ("rag_knowledge", 1),
         ("itinerary_planning", 2),
+        ("trip_compliance", 3),
     ]

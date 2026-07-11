@@ -68,6 +68,11 @@ def test_webui_routes_are_registered():
     assert "/api/{user_id}/onboarding/preference" in paths
     assert "/api/{user_id}/chat" in paths
     assert "/api/{user_id}/chat/stream" in paths
+    assert "/api/{user_id}/trip/active" in paths
+    assert "/admin/skills" in paths
+    assert "/api/admin/skills" in paths
+    assert "/api/admin/skills/{skill_name}" in paths
+    assert "/api/admin/skills/{skill_name}/enabled" in paths
 
 
 @pytest.mark.anyio

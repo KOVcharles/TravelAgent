@@ -17,50 +17,25 @@ from __future__ import annotations
 
 from typing import Dict, FrozenSet, Optional, Tuple
 
+from utils.skill_loader import SkillLoader
+
 # skill-backed 意图：intent_name -> 元信息
 # 顺序即 prompt 中展示的顺序；description 为面向意图分类的简洁中文说明。
-SKILL_INTENTS: Dict[str, Dict[str, str]] = {
-    "chitchat": {
-        "skill": "chitchat",
-        "description": "寒暄、感谢、告别、闲聊、情绪表达等社交对话",
-        "display": "闲聊",
-    },
-    "preference": {
-        "skill": "preference",
-        "description": "用户表达或更新个人偏好（酒店、航司、座位、常驻地等）",
-        "display": "偏好管理",
-    },
-    "memory_query": {
-        "skill": "memory-query",
-        "description": "查询用户自己的历史、偏好、过去行程",
-        "display": "记忆查询",
-    },
-    "event_collection": {
-        "skill": "event-collection",
-        "description": "收集行程基础信息（出发地、目的地、日期、目的等）",
-        "display": "事项收集",
-    },
-    "itinerary_planning": {
-        "skill": "plan-trip",
-        "description": "规划未来行程，通常依赖 event_collection 的结果",
-        "display": "行程规划",
-    },
-    "information_query": {
-        "skill": "query-info",
-        "description": "天气、实时信息、普通联网搜索",
-        "display": "信息查询",
-    },
-    "rag_knowledge": {
-        "skill": "ask-question",
-        "description": "差旅标准、报销、政策、制度问答（企业知识库）",
-        "display": "知识库查询",
-    },
-    "mcp_tool": {
-        "skill": "mcp-tool",
-        "description": "需要外部 MCP 工具操作（文件读写、系统操作等）",
-        "display": "MCP 工具",
-    },
-}
+def _load_skill_intents() -> Dict[str, Dict[str, str]]:
+    manifests = SkillLoader().load_manifests()
+    ordered = sorted(manifests.values(), key=lambda item: (item.catalog_order, item.name))
+    return {
+        manifest.intent: {
+            "skill": manifest.name,
+            "description": manifest.description,
+            "display": manifest.display_name,
+        }
+        for manifest in ordered
+        if manifest.intent
+    }
+
+
+SKILL_INTENTS: Dict[str, Dict[str, str]] = _load_skill_intents()
 
 # 非 skill 意图：不调用任何 skill，由主流程直接处理
 NON_SKILL_INTENTS: Dict[str, Dict[str, str]] = {
@@ -69,7 +44,7 @@ NON_SKILL_INTENTS: Dict[str, Dict[str, str]] = {
         "display": "需澄清",
     },
     "unsupported": {
-        "description": "当前系统不支持的请求（如付款、转账、删库等），不调用 skill",
+        "description": "与公司差旅无关或系统不执行的请求，不调用 skill",
         "display": "不支持",
     },
 }

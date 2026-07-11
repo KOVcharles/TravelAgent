@@ -1,10 +1,16 @@
 ---
 name: event-collection
-description: Use this skill when the user provides travel details like origin, destination, dates, purpose, or when planning a trip. It extracts structured event information for itinerary planning.
+description: Collect and incrementally update the employee's current company trip, including origin, destination, dates, purpose, work location, work schedule, and missing information. Use when a user starts or supplements a business-trip task.
 ---
 
-# Event Collection Skill
+# Collect Current Business Trip
 
-这是一个内部辅助技能，用于从用户输入中提取结构化的行程信息（出发地、目的地、时间等）。
+Use `active_trip_context` to preserve one current trip per user.
 
-通常由 `IntentionAgent` 自动调度，配合 `plan-trip` 技能使用。
+1. Merge new facts into the current trip instead of replacing known values with nulls.
+2. Extract origin, destination, dates, duration, return location, purpose, work location, and work schedule.
+3. Use a saved home location only as an explicitly marked inference.
+4. List missing information; do not invent precise dates, addresses, or work commitments.
+5. Keep private tourism outside the trip task.
+
+Return structured JSON matching `schemas/output.json`.
