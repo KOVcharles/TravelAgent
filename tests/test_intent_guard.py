@@ -160,7 +160,7 @@ def test_trip_request_routes_to_trip_planning():
     data = route.to_intention_data("我下周去上海出差，帮我安排两天行程")
     assert data["routing"]["intent"] == "itinerary_planning"
     assert _schedule_agents(route) == [
-        "event_collection", "rag_knowledge", "itinerary_planning", "trip_compliance"
+        "event_collection", "rag_knowledge", "information_query", "itinerary_planning", "trip_compliance"
     ]
 
 

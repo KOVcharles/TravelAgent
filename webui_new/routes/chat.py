@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
 
 from utils.logging_safety import sanitize_for_log
+from utils.memory_safety import redact_sensitive_text
 from utils.observability import COMPONENT_HTTP, record_app_error, record_http_request
 from webui_new.auth import User, require_path_user
 from webui_new.core.errors import AppError, BusinessError, InternalError, request_id, stream_error_event
@@ -39,9 +40,11 @@ def create_chat_router(manager):
             raise BusinessError("EMPTY_MESSAGE", "请输入消息")
 
         try:
-            logger.info(f"[{user_id}] ➤ {data.message}")
-            result = await instance.process_message(data.message)
-            logger.info(f"[{user_id}] ◀ {result.get('response', '')[:80]}...")
+            rid = request_id(request)
+            logger.info("[%s] ➤ %s", user_id, redact_sensitive_text(data.message))
+            result = await instance.process_message(data.message, request_id=rid)
+            safe_response = redact_sensitive_text(result.get("response", ""))
+            logger.info("[%s] ◀ %s...", user_id, safe_response[:80])
             return result
         except AppError:
             raise
@@ -65,8 +68,8 @@ def create_chat_router(manager):
             """把 instance.stream_message() 的事件逐行编码为 NDJSON。"""
             started_at = time.perf_counter()
             try:
-                logger.info(f"[{user_id}] -> {data.message}")
-                async for event in instance.stream_message(data.message):
+                logger.info("[%s] -> %s", user_id, redact_sensitive_text(data.message))
+                async for event in instance.stream_message(data.message, request_id=request_id(request)):
                     yield json.dumps(event, ensure_ascii=False) + "\n"
             except asyncio.CancelledError:
                 duration_ms = int((time.perf_counter() - started_at) * 1000)

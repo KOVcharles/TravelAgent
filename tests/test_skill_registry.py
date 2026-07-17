@@ -40,3 +40,35 @@ def test_lazy_agent_registry_exposes_skill_and_legacy_names():
 
     assert EXPECTED_SKILLS.issubset(keys)
     assert EXPECTED_LEGACY_AGENT_NAMES.issubset(keys)
+
+
+def test_lazy_registry_passes_explicit_skill_root_to_agent(tmp_path):
+    skill_dir = tmp_path / "custom-skill"
+    script_dir = skill_dir / "script"
+    script_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: custom-skill\ndescription: Verify custom root propagation.\n---\n\n"
+        "# Custom Skill\n\nReturn the configured Skill root.\n",
+        encoding="utf-8",
+    )
+    (skill_dir / "hommey.yaml").write_text(
+        "intent: custom_intent\n"
+        "agent_name: custom_agent\n"
+        "execution:\n"
+        "  - skill: custom-skill\n"
+        "    agent_name: custom_agent\n"
+        "    priority: 1\n",
+        encoding="utf-8",
+    )
+    (script_dir / "agent.py").write_text(
+        "from agentscope.agent import AgentBase\n"
+        "class CustomAgent(AgentBase):\n"
+        "    def __init__(self, name='custom_agent', model=None, skills_root=None):\n"
+        "        super().__init__()\n"
+        "        self.skills_root = skills_root\n",
+        encoding="utf-8",
+    )
+
+    registry = LazyAgentRegistry(model=None, cache={}, skills_root=str(tmp_path))
+
+    assert registry["custom_agent"].skills_root == str(tmp_path.resolve())

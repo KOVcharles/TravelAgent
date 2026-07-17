@@ -1,7 +1,5 @@
-name: chitchat
 version: 1.0.0
 display_name: 简短交互
-description: 处理简短问候、感谢、告别和能力介绍，并将用户引导回公司差旅任务。
 category: interaction
 intent: chitchat
 agent_name: chitchat

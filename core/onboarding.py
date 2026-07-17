@@ -1,6 +1,8 @@
 """First-run preference onboarding shared by CLI and WebUI."""
 from typing import Any, Dict, List, Optional
 
+from utils.memory_safety import is_safe_preference_value
+
 
 class InitialPreferenceOnboarding:
     """Small coordinator for first-run preference setup."""
@@ -60,6 +62,8 @@ class InitialPreferenceOnboarding:
             raise ValueError(f"Unsupported onboarding preference: {key}")
 
         clean_value = self._clean_value(value)
+        if clean_value and not is_safe_preference_value(clean_value):
+            raise ValueError("Sensitive information cannot be stored as a preference")
         if not clean_value:
             state = self.get_state(memory_manager)
             return {

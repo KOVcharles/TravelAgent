@@ -30,8 +30,8 @@ def create_skill_admin_router(service):
         data: SkillToggleRequest,
         current_user: User = Depends(require_admin),
     ):
-        manifest = service.loader.get_manifest(skill_name)
-        if not manifest:
+        definition = service.loader.get_definition(skill_name)
+        if not definition:
             raise BusinessError("SKILL_NOT_FOUND", "Skill 不存在", status_code=404)
         if not service.store.configured:
             raise BusinessError("SKILL_STORE_UNAVAILABLE", "Skill 配置存储尚未启用", status_code=503)

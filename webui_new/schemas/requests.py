@@ -4,7 +4,7 @@ WebUI API 请求体模型。
 这里只放入站 request body 的 Pydantic schema，避免路由文件里散落模型定义。
 响应结构暂时保持现状，没有在这里建 response schema。
 """
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel
 
 
 class LoginRequest(BaseModel):
@@ -26,17 +26,15 @@ class OnboardingPreferenceRequest(BaseModel):
 
 # ---------------------------------------------------------------------------
 # 鉴权（v1.0，design.md §3.7）：注册 / 登录 / 刷新 的请求与响应模型。
-# email 用 pydantic EmailStr；密码策略默认 min_length=8（questions.md Q-D）。
-# 422 触发：email 非法 / password 长度不达标 → pydantic 校验失败 →
-# 现有 validation_exception_handler 自动产出统一 422 结构（无需手写）。
+# 测试阶段暂不限制邮箱格式与密码长度；是否为空由路由统一检查并返回友好提示。
 # ---------------------------------------------------------------------------
 
 
 class RegisterRequest(BaseModel):
     """注册 / JWT 登录入参：{email, password}（登录复用同一形状，见 design.md §3.8）。"""
 
-    email: EmailStr
-    password: str = Field(min_length=8, max_length=128)
+    email: str
+    password: str
 
 
 class RefreshRequest(BaseModel):
@@ -55,4 +53,4 @@ class UserResponse(BaseModel):
     """注册成功返回体（仅 id/email；password_hash 与明文绝不外泄）。"""
 
     id: int
-    email: EmailStr
+    email: str

@@ -57,11 +57,11 @@ class LazyAgentRegistry:
         from utils.skill_loader import SkillLoader
 
         loader = SkillLoader(str(self.skills_root))
-        for skill_name, manifest in loader.load_manifests().items():
-            agent_script = self.skills_root / skill_name / manifest.entrypoint
-            if manifest.agent_name and agent_script.exists():
+        for skill_name, definition in loader.load_definitions().items():
+            agent_script = self.skills_root / skill_name / definition.entrypoint
+            if definition.agent_name and agent_script.exists():
                 self._skill_map[skill_name] = agent_script
-                self._agent_to_skill[manifest.agent_name] = skill_name
+                self._agent_to_skill[definition.agent_name] = skill_name
 
     def _resolve_agent_name(self, agent_name: str) -> Optional[str]:
         if agent_name in self._skill_map:
@@ -123,6 +123,8 @@ class LazyAgentRegistry:
                 init_params["memory_manager"] = self.memory_manager
             if "mcp_manager" in sig.parameters:
                 init_params["mcp_manager"] = self.mcp_manager
+            if "skills_root" in sig.parameters:
+                init_params["skills_root"] = str(self.skills_root)
 
             agent_instance = agent_class(**init_params)
             self.cache[agent_name] = agent_instance

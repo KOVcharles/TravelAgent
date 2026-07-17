@@ -9,6 +9,13 @@ import json
 import logging
 import uuid
 
+from utils.memory_safety import (
+    filter_safe_memory_mapping,
+    is_safe_preference_value,
+    redact_sensitive_text,
+    sanitize_memory_value,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -82,6 +89,9 @@ class FileLongTermMemory:
         tmp_path.replace(self.file_path)
 
     def save_preference(self, pref_type: str, value: Any):
+        if not is_safe_preference_value(value):
+            raise ValueError(f"Sensitive value is not allowed for preference: {pref_type}")
+        value = sanitize_memory_value(value)
         self.data.setdefault("preferences", {})[pref_type] = value
         self._save()
         logger.info(f"Saved preference: {pref_type} = {value}")
@@ -110,27 +120,67 @@ class FileLongTermMemory:
         self.save_preference("airlines", airlines)
         logger.info(f"Added airline preference: {airline}")
 
-    def add_chat_message(self, role: str, content: str, session_id: str = None):
+    def add_chat_message(
+        self,
+        role: str,
+        content: str,
+        session_id: str = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ):
+        metadata = metadata or {}
+        content = redact_sensitive_text(content)
+        request_id = metadata.get("request_id")
+        if request_id and any(
+            row.get("request_id") == request_id and row.get("role") == role
+            for row in self.data.setdefault("chat_history", [])
+        ):
+            logger.info("Skipped duplicate chat message for request %s (%s)", request_id, role)
+            return False
         self.data.setdefault("chat_history", []).append({
             "role": role,
             "content": content,
             "timestamp": _utc_now_iso(),
             "session_id": session_id,
+            "request_id": request_id,
         })
         stats = self.data.setdefault("statistics", {})
         stats["total_messages"] = int(stats.get("total_messages", 0)) + 1
         self._save()
         logger.debug(f"Added chat message to long-term memory: {role}")
+        return True
 
-    def get_chat_history(self, limit: int = None, session_id: str = None) -> List[Dict[str, Any]]:
+    def get_chat_history(
+        self,
+        limit: int = None,
+        session_id: str = None,
+        exclude_session_id: str = None,
+        request_id: str = None,
+    ) -> List[Dict[str, Any]]:
         rows = self.data.setdefault("chat_history", [])
         if session_id:
             rows = [row for row in rows if row.get("session_id") == session_id]
+        if exclude_session_id:
+            rows = [row for row in rows if row.get("session_id") != exclude_session_id]
+        if request_id:
+            rows = [row for row in rows if row.get("request_id") == request_id]
         if limit:
             rows = rows[-limit:]
         return [dict(row) for row in rows]
 
     def save_trip_history(self, trip_info: Dict[str, Any]):
+        trip_info = filter_safe_memory_mapping(trip_info)
+        request_id = trip_info.get("request_id")
+        if request_id:
+            existing = next(
+                (
+                    row for row in self.data.setdefault("trip_history", [])
+                    if row.get("request_id") == request_id
+                ),
+                None,
+            )
+            if existing:
+                logger.info("Skipped duplicate trip for request %s", request_id)
+                return existing.get("trip_id")
         trip_id = f"trip_{uuid.uuid4().hex[:12]}"
         destination = trip_info.get("destination")
         trip = {
@@ -141,6 +191,7 @@ class FileLongTermMemory:
             "start_date": trip_info.get("start_date"),
             "end_date": trip_info.get("end_date"),
             "purpose": trip_info.get("purpose"),
+            "request_id": request_id,
         }
         self.data.setdefault("trip_history", []).append(trip)
         stats = self.data.setdefault("statistics", {})
@@ -150,6 +201,7 @@ class FileLongTermMemory:
             freq[destination] = int(freq.get(destination, 0)) + 1
         self._save()
         logger.info(f"Saved trip history: {trip_id}")
+        return trip_id
 
     def get_trip_history(self, limit: int = 10) -> List[Dict[str, Any]]:
         rows = self.data.setdefault("trip_history", [])
@@ -158,10 +210,15 @@ class FileLongTermMemory:
         return [dict(row) for row in rows]
 
     def upsert_active_trip(self, trip_info: Dict[str, Any]) -> Dict[str, Any]:
+        trip_info = filter_safe_memory_mapping(trip_info)
         current = self.data.get("active_trip") or {}
+        if current.get("status") in {"completed", "cancelled"}:
+            current = {}
         merged = {**current, **{key: value for key, value in trip_info.items() if value is not None}}
         merged["status"] = merged.get("status", "active")
         merged["updated_at"] = _utc_now_iso()
+        if merged["status"] in {"completed", "cancelled"}:
+            merged["completed_at"] = _utc_now_iso()
         self.data["active_trip"] = merged
         self._save()
         return dict(merged)
@@ -279,6 +336,7 @@ class PostgresLongTermMemory:
                     session_id TEXT,
                     role TEXT NOT NULL,
                     content TEXT NOT NULL,
+                    request_id TEXT,
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 );
                 """
@@ -294,8 +352,37 @@ class PostgresLongTermMemory:
                     start_date TEXT,
                     end_date TEXT,
                     purpose TEXT,
+                    request_id TEXT,
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 );
+                """
+            )
+            cur.execute("ALTER TABLE chat_history ADD COLUMN IF NOT EXISTS request_id TEXT;")
+            cur.execute("ALTER TABLE trip_history ADD COLUMN IF NOT EXISTS request_id TEXT;")
+            cur.execute(
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS uq_chat_history_request_role
+                ON chat_history (user_id, request_id, role)
+                WHERE request_id IS NOT NULL;
+                """
+            )
+            cur.execute(
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS uq_trip_history_request
+                ON trip_history (user_id, request_id)
+                WHERE request_id IS NOT NULL;
+                """
+            )
+            cur.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_chat_history_user_created
+                ON chat_history (user_id, created_at DESC);
+                """
+            )
+            cur.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_trip_history_user_created
+                ON trip_history (user_id, created_at DESC);
                 """
             )
             cur.execute(
@@ -343,6 +430,9 @@ class PostgresLongTermMemory:
             pref_type: 偏好类型
             value: 偏好值
         """
+        if not is_safe_preference_value(value):
+            raise ValueError(f"Sensitive value is not allowed for preference: {pref_type}")
+        value = sanitize_memory_value(value)
         with self.conn.cursor() as cur:
             cur.execute(
                 """
@@ -410,7 +500,13 @@ class PostgresLongTermMemory:
         self.save_preference("airlines", airlines)
         logger.info(f"Added airline preference: {airline}")
 
-    def add_chat_message(self, role: str, content: str, session_id: str = None):
+    def add_chat_message(
+        self,
+        role: str,
+        content: str,
+        session_id: str = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ):
         """
         添加聊天消息到长期记忆
 
@@ -419,14 +515,25 @@ class PostgresLongTermMemory:
             content: 消息内容
             session_id: 会话ID（可选）
         """
+        metadata = metadata or {}
+        content = redact_sensitive_text(content)
+        request_id = metadata.get("request_id")
         with self.conn.cursor() as cur:
             cur.execute(
                 """
-                INSERT INTO chat_history (user_id, session_id, role, content, created_at)
-                VALUES (%s, %s, %s, %s, NOW());
+                INSERT INTO chat_history (user_id, session_id, role, content, request_id, created_at)
+                VALUES (%s, %s, %s, %s, %s, NOW())
+                ON CONFLICT (user_id, request_id, role)
+                WHERE request_id IS NOT NULL
+                DO NOTHING
+                RETURNING id;
                 """,
-                (self.user_id, session_id, role, content),
+                (self.user_id, session_id, role, content, request_id),
             )
+            inserted = cur.fetchone()
+            if not inserted:
+                logger.info("Skipped duplicate chat message for request %s (%s)", request_id, role)
+                return False
             cur.execute(
                 """
                 UPDATE user_statistics
@@ -436,8 +543,15 @@ class PostgresLongTermMemory:
                 (self.user_id,),
             )
         logger.debug(f"Added chat message to long-term memory: {role}")
+        return True
 
-    def get_chat_history(self, limit: int = None, session_id: str = None) -> List[Dict[str, Any]]:
+    def get_chat_history(
+        self,
+        limit: int = None,
+        session_id: str = None,
+        exclude_session_id: str = None,
+        request_id: str = None,
+    ) -> List[Dict[str, Any]]:
         """
         获取聊天历史
 
@@ -449,7 +563,7 @@ class PostgresLongTermMemory:
             消息列表
         """
         sql = """
-            SELECT role, content, created_at, session_id
+            SELECT role, content, created_at, session_id, request_id
             FROM chat_history
             WHERE user_id = %s
         """
@@ -457,6 +571,12 @@ class PostgresLongTermMemory:
         if session_id:
             sql += " AND session_id = %s"
             params.append(session_id)
+        if exclude_session_id:
+            sql += " AND (session_id IS NULL OR session_id <> %s)"
+            params.append(exclude_session_id)
+        if request_id:
+            sql += " AND request_id = %s"
+            params.append(request_id)
         sql += " ORDER BY created_at DESC"
         if limit:
             sql += " LIMIT %s"
@@ -471,6 +591,7 @@ class PostgresLongTermMemory:
                 "content": row["content"],
                 "timestamp": row["created_at"].isoformat(),
                 "session_id": row["session_id"],
+                "request_id": row["request_id"],
             }
             for row in rows
         ]
@@ -482,15 +603,21 @@ class PostgresLongTermMemory:
         Args:
             trip_info: 行程信息
         """
+        trip_info = filter_safe_memory_mapping(trip_info)
         trip_id = f"trip_{uuid.uuid4().hex[:12]}"
         destination = trip_info.get("destination")
+        request_id = trip_info.get("request_id")
         with self.conn.cursor() as cur:
             cur.execute(
                 """
                 INSERT INTO trip_history (
-                    trip_id, user_id, origin, destination, start_date, end_date, purpose, created_at
+                    trip_id, user_id, origin, destination, start_date, end_date, purpose, request_id, created_at
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, NOW());
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW())
+                ON CONFLICT (user_id, request_id)
+                WHERE request_id IS NOT NULL
+                DO NOTHING
+                RETURNING trip_id;
                 """,
                 (
                     trip_id,
@@ -500,8 +627,13 @@ class PostgresLongTermMemory:
                     trip_info.get("start_date"),
                     trip_info.get("end_date"),
                     trip_info.get("purpose"),
+                    request_id,
                 ),
             )
+            inserted = cur.fetchone()
+            if not inserted:
+                logger.info("Skipped duplicate trip for request %s", request_id)
+                return None
             if destination:
                 cur.execute(
                     """
@@ -529,6 +661,7 @@ class PostgresLongTermMemory:
                     (self.user_id,),
                 )
         logger.info(f"Saved trip history: {trip_id}")
+        return trip_id
 
     def get_trip_history(self, limit: int = 10) -> List[Dict[str, Any]]:
         """
@@ -568,7 +701,10 @@ class PostgresLongTermMemory:
         ]
 
     def upsert_active_trip(self, trip_info: Dict[str, Any]) -> Dict[str, Any]:
+        trip_info = filter_safe_memory_mapping(trip_info)
         current = self.get_active_trip() or {}
+        if current.get("status") in {"completed", "cancelled"}:
+            current = {}
         merged = {**current, **{key: value for key, value in trip_info.items() if value is not None}}
         status = merged.get("status", "active")
         with self.conn.cursor() as cur:
@@ -580,7 +716,10 @@ class PostgresLongTermMemory:
                     status = EXCLUDED.status,
                     context_data = EXCLUDED.context_data,
                     updated_at = NOW(),
-                    completed_at = CASE WHEN EXCLUDED.status = 'completed' THEN NOW() ELSE NULL END
+                    completed_at = CASE
+                        WHEN EXCLUDED.status IN ('completed', 'cancelled') THEN NOW()
+                        ELSE NULL
+                    END
                 """,
                 (self.user_id, status, self._jsonb(merged)),
             )

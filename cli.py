@@ -8,6 +8,8 @@ import asyncio
 import sys
 import os
 import logging
+import time
+import uuid
 from typing import Optional
 
 # 添加项目根目录到路径
@@ -36,6 +38,7 @@ from hommey_mcp.mcp_config import MCPConfig
 from core.intent_catalog import INTENT_DISPLAY_NAMES
 from core.intent_router import FastIntentRouter
 from core.onboarding import InitialPreferenceOnboarding, detect_city_from_ip
+from utils.memory_safety import wrap_untrusted_memory
 # 移除其他智能体的导入，改用懒加载
 
 logger = logging.getLogger(__name__)
@@ -69,6 +72,7 @@ class HommeyCLI:
         self.onboarding = InitialPreferenceOnboarding()
         self._summary_cache: Optional[str] = None
         self._summary_msg_count = 0
+        self._last_activity_monotonic: Optional[float] = None
 
     def print_banner(self):
         """打印欢迎横幅"""
@@ -219,8 +223,20 @@ class HommeyCLI:
         处理用户查询（原逻辑保留；仅在入口加熔断检查、对 LLM 调用加重试）
         """
         user_input = _clean_text_for_utf8(user_input)
-        import time
         start_time = time.perf_counter()
+        self._ensure_active_session()
+        request_id = uuid.uuid4().hex
+        metadata = {"request_id": request_id}
+        self.memory_manager.current_request_id = request_id
+
+        lifecycle_response = self._handle_task_lifecycle_command(user_input)
+        if lifecycle_response is not None:
+            self.memory_manager.add_message("user", user_input, metadata)
+            self.memory_manager.add_message("assistant", lifecycle_response, metadata)
+            self.memory_manager.long_term.increment_query_count()
+            self.console.print(f"\n[green]{lifecycle_response}[/green]\n")
+            logger.info("CLI lifecycle command completed in %.3fs", time.perf_counter() - start_time)
+            return
 
         # ---------- 仅新增：熔断检查 ----------
         if self.circuit_breaker:
@@ -255,11 +271,24 @@ class HommeyCLI:
                 )
             else:
                 # 1. 获取长期记忆摘要与上下文（原逻辑不变）
-                long_term_summary = await self._get_cached_summary(user_input)
+                long_term_summary = await self._get_cached_summary()
+                relevant_trip_context = self._get_relevant_trip_context(user_input)
                 recent_context = self.memory_manager.short_term.get_recent_context(n_turns=5)
                 context_messages = []
+                memory_parts = []
+                active_trip = self.memory_manager.get_active_trip()
+                if active_trip:
+                    memory_parts.extend(["【当前出差任务】", json.dumps(active_trip, ensure_ascii=False)])
                 if long_term_summary:
-                    context_messages.append(Msg(name="system", content=long_term_summary, role="system"))
+                    memory_parts.append(long_term_summary)
+                if relevant_trip_context:
+                    memory_parts.append(relevant_trip_context)
+                if memory_parts:
+                    context_messages.append(Msg(
+                        name="system",
+                        content=wrap_untrusted_memory("\n".join(memory_parts)),
+                        role="system",
+                    ))
                 for msg in recent_context:
                     context_messages.append(Msg(name=msg["role"], content=msg["content"], role=msg["role"]))
                 context_messages.append(Msg(name="user", content=user_input, role="user"))
@@ -289,7 +318,7 @@ class HommeyCLI:
                 return
 
         # 4. 添加用户输入到短期记忆（原逻辑不变）
-        self.memory_manager.add_message("user", user_input)
+        self.memory_manager.add_message("user", user_input, metadata)
         self.memory_manager.long_term.increment_query_count()
 
         # 5. 调度智能体
@@ -320,7 +349,7 @@ class HommeyCLI:
         self._display_agents_called(result_data)
         self.console.print()
         self._display_results(result_data)
-        self.memory_manager.add_message("assistant", json.dumps(result_data, ensure_ascii=False))
+        self.memory_manager.add_message("assistant", json.dumps(result_data, ensure_ascii=False), metadata)
         logger.info("CLI query completed in %.3fs", time.perf_counter() - start_time)
 
     def _display_agents_called(self, result_data: dict):
@@ -382,28 +411,65 @@ class HommeyCLI:
 
         self.console.print()
 
-    async def _get_cached_summary(self, user_input: str = "") -> str:
+    def _ensure_active_session(self) -> bool:
+        """Rotate the CLI session after the configured idle timeout."""
+        now = time.monotonic()
+        timeout = int(MEMORY_CONFIG.get("short_term", {}).get("session_idle_timeout_sec", 600))
+        rotated = bool(
+            self._last_activity_monotonic is not None
+            and now - self._last_activity_monotonic >= max(timeout, 1)
+        )
+        if rotated:
+            self.session_id = str(uuid.uuid4())[:8]
+            self.memory_manager.rotate_session(self.session_id)
+            self._summary_cache = None
+            self._summary_msg_count = 0
+        self._last_activity_monotonic = now
+        return rotated
+
+    def _handle_task_lifecycle_command(self, message: str) -> Optional[str]:
+        """Handle explicit current-task completion/cancellation without an LLM call."""
+        normalized = "".join(message.strip().lower().split())
+        cancel_commands = {
+            "取消当前行程", "取消这个行程", "这个行程取消", "这个行程不安排了", "不安排这个行程了",
+        }
+        complete_commands = {
+            "完成当前行程", "结束当前行程", "当前行程完成了", "这个行程完成了", "行程规划完成",
+        }
+        if normalized in cancel_commands:
+            cancelled = self.memory_manager.cancel_active_trip()
+            return "已取消当前行程任务。" if cancelled else "当前没有进行中的行程任务。"
+        if normalized in complete_commands:
+            completed = self.memory_manager.complete_active_trip(reason="user_completed")
+            return "已完成当前行程任务。" if completed else "当前没有进行中的行程任务。"
+        return None
+
+    async def _get_cached_summary(self) -> str:
         """Return cached long-term summary to avoid one LLM call per CLI turn."""
         stats = self.memory_manager.short_term.get_statistics()
-        current_count = int(stats.get("total_messages", 0))
+        current_count = int(stats.get("message_version", stats.get("total_messages", 0)))
 
         if self._summary_cache is None or current_count - self._summary_msg_count >= 5:
-            summary = await self._get_long_term_summary(user_input)
+            summary = await self._get_long_term_summary()
             if summary:
                 self._summary_cache = summary
                 self._summary_msg_count = current_count
-            return summary or self._summary_cache or ""
+                return summary
+            if self._summary_cache is not None:
+                self._summary_msg_count = current_count
+                return self._summary_cache
+            self._summary_cache = ""
+            self._summary_msg_count = current_count
+            return ""
 
         return self._summary_cache or ""
 
-    async def _get_long_term_summary(self, user_input: str = "") -> str:
+    async def _get_long_term_summary(self) -> str:
         """
         生成长期记忆摘要，用于传递给IntentionAgent
         使用LLM总结历史聊天记录 + 结构化偏好
 
         Args:
-            user_input: 用户输入，用于筛选相关历史行程
-
         Returns:
             格式化的长期记忆摘要
         """
@@ -433,9 +499,18 @@ class HommeyCLI:
             summary_parts.append("\n【历史会话总结】")
             summary_parts.append(chat_summary)
 
-        # 3. 智能筛选相关历史行程
+        return "\n".join(summary_parts) if summary_parts else ""
+
+    def _get_relevant_trip_context(self, user_input: str) -> str:
+        """Build query-specific trip context outside the shared summary cache."""
+        summary_parts = []
         all_trips = self.memory_manager.long_term.get_trip_history(limit=None)
         if all_trips:
+            all_trips = sorted(
+                all_trips,
+                key=lambda item: item.get("timestamp", "") or "",
+                reverse=True,
+            )
             # 筛选相关的行程（地点匹配）
             relevant_trips = []
             other_trips = []
@@ -907,7 +982,10 @@ class HommeyCLI:
                     await self.run_health_check()
                 elif command == "clear":
                     self.memory_manager.short_term.clear()
-                    self.console.print("✓ 已清空短期记忆", style="green")
+                    self.memory_manager.cancel_active_trip(reason="user_cleared")
+                    self._summary_cache = None
+                    self._summary_msg_count = 0
+                    self.console.print("✓ 已清空当前会话并取消当前任务", style="green")
                 elif command == "history":
                     self.show_history()
                 elif command == "preferences":

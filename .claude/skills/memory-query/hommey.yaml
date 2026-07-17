@@ -1,7 +1,5 @@
-name: memory-query
 version: 1.0.0
 display_name: 差旅记忆查询
-description: 查询用户自己的差旅历史、当前任务和出行偏好，不回答通用历史记录问题。
 category: capability
 intent: memory_query
 agent_name: memory_query

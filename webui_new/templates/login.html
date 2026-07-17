@@ -139,7 +139,7 @@
 
         .login-form {
             width: min(720px, 100%);
-            margin-top: 28px;
+            margin-top: 12px;
             padding: 7px;
             display: grid;
             grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr) auto;
@@ -216,6 +216,40 @@
 
         .error-msg.visible { visibility: visible; }
 
+        .auth-mode {
+            margin-top: 24px;
+            padding: 4px;
+            display: inline-flex;
+            gap: 4px;
+            border: 1px solid var(--line);
+            border-radius: 999px;
+            background: rgba(255,255,255,0.58);
+        }
+
+        .mode-btn {
+            min-width: 82px;
+            padding: 8px 16px;
+            border: 0;
+            border-radius: 999px;
+            background: transparent;
+            color: var(--muted);
+            font: inherit;
+            font-size: 13px;
+            font-weight: 700;
+            cursor: pointer;
+        }
+
+        .mode-btn.active {
+            background: var(--dark);
+            color: #fff8ef;
+            box-shadow: 0 8px 20px rgba(37,33,29,0.14);
+        }
+
+        .mode-btn:disabled {
+            cursor: wait;
+            opacity: 0.72;
+        }
+
         .route-line {
             position: fixed;
             left: 7vw;
@@ -285,8 +319,13 @@
                 data-phrases="今天我要去上海出差，补贴标准是怎么样？|下周去深圳，两天一晚怎么安排更稳妥？|帮我查一下北京到杭州的高铁和住宿标准。|明早 9 点到虹桥，几点出门比较稳妥？|这次可以订一等座吗？帮我看一下差旅规则。|会议在静安寺附近，酒店选哪里更合适？|帮我把三天两晚的行程整理成可执行计划。|如果航班延误，帮我准备一个备选路线。"
             ></div>
 
+            <div class="auth-mode" role="tablist" aria-label="登录或注册">
+                <button id="loginModeBtn" class="mode-btn active" type="button" role="tab" aria-selected="true">登录</button>
+                <button id="registerModeBtn" class="mode-btn" type="button" role="tab" aria-selected="false">注册</button>
+            </div>
+
             <form id="loginForm" class="login-form" autocomplete="on">
-                <input id="email" class="input-field" type="email" placeholder="邮箱" autocomplete="email" spellcheck="false" autofocus>
+                <input id="email" class="input-field" type="text" placeholder="邮箱（测试不限格式）" autocomplete="username" spellcheck="false" autofocus>
                 <input id="password" class="input-field" type="password" placeholder="密码" autocomplete="current-password">
                 <button id="submitBtn" class="submit-btn" type="submit">
                     <span id="btnText">进入 Hommey</span>
@@ -318,6 +357,9 @@
         const errorMsg = document.getElementById('errorMsg');
         const errorText = document.getElementById('errorText');
         const typingText = document.getElementById('typingText');
+        const loginModeBtn = document.getElementById('loginModeBtn');
+        const registerModeBtn = document.getElementById('registerModeBtn');
+        let authMode = 'login';
 
         function showError(message) {
             errorText.textContent = message;
@@ -331,8 +373,23 @@
 
         function setLoading(loading) {
             submitBtn.disabled = loading;
+            loginModeBtn.disabled = loading;
+            registerModeBtn.disabled = loading;
             btnText.style.display = loading ? 'none' : 'inline';
             btnLoading.style.display = loading ? 'inline' : 'none';
+        }
+
+        function setAuthMode(mode) {
+            authMode = mode;
+            const registering = mode === 'register';
+            loginModeBtn.classList.toggle('active', !registering);
+            registerModeBtn.classList.toggle('active', registering);
+            loginModeBtn.setAttribute('aria-selected', String(!registering));
+            registerModeBtn.setAttribute('aria-selected', String(registering));
+            passwordInput.autocomplete = registering ? 'new-password' : 'current-password';
+            btnText.textContent = registering ? '注册并进入' : '进入 Hommey';
+            btnLoading.lastChild.textContent = registering ? '正在注册' : '正在进入';
+            clearError();
         }
 
         function startTyping() {
@@ -368,6 +425,8 @@
 
         emailInput.addEventListener('input', clearError);
         passwordInput.addEventListener('input', clearError);
+        loginModeBtn.addEventListener('click', () => setAuthMode('login'));
+        registerModeBtn.addEventListener('click', () => setAuthMode('register'));
 
         function decodeJwtPayload(token) {
             const part = String(token || '').split('.')[1];
@@ -379,6 +438,23 @@
             } catch (err) {
                 return null;
             }
+        }
+
+        async function readError(response, fallback) {
+            try {
+                const body = await response.json();
+                return body.error?.message || body.error || body.detail || fallback;
+            } catch (err) {
+                return fallback;
+            }
+        }
+
+        async function login(email, password) {
+            return fetch('/auth/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email, password }),
+            });
         }
 
         form.addEventListener('submit', async (event) => {
@@ -394,14 +470,26 @@
 
             setLoading(true);
             try {
-                const res = await fetch('/auth/login', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ email, password }),
-                });
+                if (authMode === 'register') {
+                    const registerRes = await fetch('/auth/register', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ email, password }),
+                    });
+                    if (!registerRes.ok) {
+                        showError(await readError(registerRes, '注册失败，请重试'));
+                        setLoading(false);
+                        return;
+                    }
+                    btnLoading.lastChild.textContent = '正在进入';
+                }
+
+                const res = await login(email, password);
                 if (!res.ok) {
-                    const err = await res.json();
-                    showError(err.error?.message || err.error || err.detail || '登录失败，请重试');
+                    const fallback = authMode === 'register'
+                        ? '注册成功，但自动登录失败，请切换到登录后重试'
+                        : '登录失败，请重试';
+                    showError(await readError(res, fallback));
                     setLoading(false);
                     return;
                 }

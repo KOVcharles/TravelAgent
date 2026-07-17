@@ -1,7 +1,5 @@
-name: ask-question
 version: 1.0.0
 display_name: 企业差旅问答
-description: 基于企业知识库回答差旅制度、补贴、报销、预订规则和例外处理问题，并在证据不足时拒绝给出确定结论。
 category: business
 intent: rag_knowledge
 agent_name: rag_knowledge

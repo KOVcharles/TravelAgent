@@ -39,12 +39,13 @@ class RAGKnowledgeAgent(AgentBase):
         collection_name: str = "business_travel_knowledge",
         embedding_model: str = "BAAI/bge-small-zh-v1.5",
         top_k: int = 3,
+        skills_root: Optional[str] = None,
         **kwargs,
     ):
         super().__init__()
         self.name = name
         self.model = model
-        self.skill_loader = SkillLoader()
+        self.skill_loader = SkillLoader(skills_root)
 
         self.retriever = KnowledgeRetriever(
             knowledge_base_path=knowledge_base_path or RAG_CONFIG.get("knowledge_base_path", "data/rag_knowledge"),
@@ -139,6 +140,25 @@ class RAGKnowledgeAgent(AgentBase):
             return text
 
         context = data.get("context")
+        previous_results = data.get("previous_results") or []
+        trip = next(
+            (
+                (item.get("result") or {}).get("data")
+                for item in reversed(previous_results)
+                if item.get("agent_name") == "event_collection"
+            ),
+            None,
+        )
+        if isinstance(trip, dict) and trip.get("origin") and trip.get("destination"):
+            dates = trip.get("start_date") or "日期待确认"
+            duration = (
+                f"{trip['duration_days']}天" if trip.get("duration_days")
+                else trip.get("end_date") or "行程时长待确认"
+            )
+            return (
+                f"请检索从{trip['origin']}到{trip['destination']}、{dates}、{duration}的公司出差，"
+                "适用的住宿、交通、补贴、报销和审批制度。只返回公司制度证据，不提供路线规划。"
+            )
         if isinstance(context, dict):
             query = context.get("rewritten_query") or context.get("user_query")
             if query:

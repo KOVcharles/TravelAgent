@@ -10,8 +10,8 @@
   识别寒暄，并统一路由到 chitchat skill。
 - cli.py / legacy/webui_gradio.py / webui_new/manager.py —— 用 INTENT_DISPLAY_NAMES 统一中文标签。
 
-一致性由 tests/test_intent_catalog.py 保证：目录中的 skill 集合必须与
-utils.skill_loader 实际发现的 skill 目录一致，防止漂移。
+一致性由 tests/test_intent_catalog.py 保证：意图目录必须覆盖所有声明了
+Hommey intent 的 Skill；只有标准 `SKILL.md`、没有意图扩展的包不参与该约束。
 """
 from __future__ import annotations
 
@@ -22,16 +22,16 @@ from utils.skill_loader import SkillLoader
 # skill-backed 意图：intent_name -> 元信息
 # 顺序即 prompt 中展示的顺序；description 为面向意图分类的简洁中文说明。
 def _load_skill_intents() -> Dict[str, Dict[str, str]]:
-    manifests = SkillLoader().load_manifests()
-    ordered = sorted(manifests.values(), key=lambda item: (item.catalog_order, item.name))
+    definitions = SkillLoader().load_definitions()
+    ordered = sorted(definitions.values(), key=lambda item: (item.catalog_order, item.name))
     return {
-        manifest.intent: {
-            "skill": manifest.name,
-            "description": manifest.description,
-            "display": manifest.display_name,
+        definition.intent: {
+            "skill": definition.name,
+            "description": definition.description,
+            "display": definition.display_name,
         }
-        for manifest in ordered
-        if manifest.intent
+        for definition in ordered
+        if definition.intent
     }
 
 

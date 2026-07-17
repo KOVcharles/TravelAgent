@@ -16,12 +16,13 @@ sys.path.insert(0, project_root)
 
 from agents.intention_agent import IntentionAgent
 from agents.orchestration_agent import OrchestrationAgent
-from settings import RESILIENCE_CONFIG
+from settings import MEMORY_CONFIG, RESILIENCE_CONFIG
 from context.memory_manager import MemoryManager
 from runtime import create_agent_runtime, create_circuit_breaker
 from utils.circuit_breaker import CircuitBreaker, CircuitOpenError
 from utils.llm_resilience import retry_with_backoff
 from utils.logging_safety import sanitize_for_log
+from utils.memory_safety import redact_sensitive_text, wrap_untrusted_memory
 from utils.observability import COMPONENT_LLM, ERROR_CIRCUIT_OPEN, record_upstream_error
 from webui_new.core.errors import BusinessError, InternalError, UpstreamError
 from core.onboarding import InitialPreferenceOnboarding
@@ -66,6 +67,7 @@ class HommeyWebInstance:
         self._summary_cache: Optional[str] = None  # 长期记忆摘要缓存
         self._summary_msg_count: int = 0           # 缓存时的消息数
         self._total_messages: int = 0              # 本会话消息计数
+        self._last_activity_monotonic: Optional[float] = None
 
     async def initialize(self):
         """Initialize the shared Hommey runtime for this web user."""
@@ -166,24 +168,62 @@ class HommeyWebInstance:
             return True
         return False
 
-    async def _get_cached_summary(self, user_input: str) -> str:
-        """获取缓存的长期记忆摘要（避免每次调用 LLM）"""
-        current_count = len(self.memory_manager.short_term.messages)
+    async def _get_cached_summary(self) -> str:
+        """Cache only query-independent memory; dynamic trip retrieval stays per request."""
+        stats = self.memory_manager.short_term.get_statistics()
+        current_count = int(stats.get("message_version", stats.get("total_messages", 0)))
 
         # 仅在首次或消息数增长超过阈值时重新生成
         if self._summary_cache is None or current_count - self._summary_msg_count >= 5:
-            summary = await self._get_long_term_summary(user_input)
+            summary = await self._get_long_term_summary()
             if summary:
                 self._summary_cache = summary
                 self._summary_msg_count = current_count
                 return summary
-            elif self._summary_cache:
+            elif self._summary_cache is not None:
+                self._summary_msg_count = current_count
                 return self._summary_cache
+            self._summary_cache = ""
+            self._summary_msg_count = current_count
             return ""
 
         return self._summary_cache or ""
 
-    async def process_message(self, message: str) -> dict:
+    def _ensure_active_session(self) -> bool:
+        """Rotate the dialogue session after the configured idle timeout."""
+        now = time.monotonic()
+        timeout = int(MEMORY_CONFIG.get("short_term", {}).get("session_idle_timeout_sec", 600))
+        rotated = bool(
+            self._last_activity_monotonic is not None
+            and now - self._last_activity_monotonic >= max(timeout, 1)
+        )
+        if rotated:
+            self.session_id = str(uuid.uuid4())[:8]
+            self.memory_manager.rotate_session(self.session_id)
+            self._summary_cache = None
+            self._summary_msg_count = 0
+            self._total_messages = 0
+        self._last_activity_monotonic = now
+        return rotated
+
+    def _handle_task_lifecycle_command(self, message: str) -> Optional[str]:
+        """Handle explicit, narrowly-scoped current-task completion/cancellation commands."""
+        normalized = "".join(message.strip().lower().split())
+        cancel_commands = {
+            "取消当前行程", "取消这个行程", "这个行程取消", "这个行程不安排了", "不安排这个行程了",
+        }
+        complete_commands = {
+            "完成当前行程", "结束当前行程", "当前行程完成了", "这个行程完成了", "行程规划完成",
+        }
+        if normalized in cancel_commands:
+            cancelled = self.memory_manager.cancel_active_trip()
+            return "已取消当前行程任务。" if cancelled else "当前没有进行中的行程任务。"
+        if normalized in complete_commands:
+            completed = self.memory_manager.complete_active_trip(reason="user_completed")
+            return "已结束当前行程任务。" if completed else "当前没有进行中的行程任务。"
+        return None
+
+    async def process_message(self, message: str, request_id: str | None = None) -> dict:
         """处理用户消息，返回响应"""
         from agentscope.message import Msg
 
@@ -193,11 +233,32 @@ class HommeyWebInstance:
         if not self.initialized:
             raise BusinessError("NOT_INITIALIZED", "系统未初始化，请刷新页面")
 
+        self._ensure_active_session()
+        if request_id:
+            get_recorded_response = getattr(self.memory_manager, "get_recorded_response", None)
+            recorded = get_recorded_response(request_id) if get_recorded_response else None
+            if recorded:
+                return {
+                    "response": recorded,
+                    "agents": [],
+                    "preferences_updated": False,
+                    "idempotent_replay": True,
+                }
+        metadata = {"request_id": request_id} if request_id else {}
+        if self.memory_manager is not None:
+            self.memory_manager.current_request_id = request_id
+
+        lifecycle_response = self._handle_task_lifecycle_command(message)
+        if lifecycle_response:
+            self.memory_manager.add_message("user", message, metadata)
+            self.memory_manager.add_message("assistant", lifecycle_response, metadata)
+            return {"response": lifecycle_response, "agents": [], "preferences_updated": False}
+
         # ═══ 优化 1: 简单闲聊直接处理，不经过 LLM ═══
         if self._is_simple_chitchat(message):
-            self.memory_manager.add_message("user", message)
+            self.memory_manager.add_message("user", message, metadata)
             response = await self._handle_chitchat(message)
-            self.memory_manager.add_message("assistant", response)
+            self.memory_manager.add_message("assistant", response, metadata)
             return {"response": response, "agents": [], "preferences_updated": False}
 
         rc = RESILIENCE_CONFIG
@@ -264,7 +325,7 @@ class HommeyWebInstance:
             )
 
         self._total_messages += 1
-        self.memory_manager.add_message("user", message)
+        self.memory_manager.add_message("user", message, metadata)
 
         # 3. Orchestration
         try:
@@ -304,15 +365,15 @@ class HommeyWebInstance:
         if result_data.get("status") == "no_agents" and not result_data.get("results"):
             if result_data.get("message"):
                 response = result_data["message"]
-                self.memory_manager.add_message("assistant", response)
+                self.memory_manager.add_message("assistant", response, metadata)
                 return {"response": response, "agents": [], "preferences_updated": False}
             response = await self._handle_chitchat(message)
-            self.memory_manager.add_message("assistant", response)
+            self.memory_manager.add_message("assistant", response, metadata)
             return {"response": response, "agents": [], "preferences_updated": False}
 
         # 5. Format response
         response = self._format_response(result_data)
-        self.memory_manager.add_message("assistant", json.dumps(result_data, ensure_ascii=False))
+        self.memory_manager.add_message("assistant", response, metadata)
 
         # 6. Extract agent names
         agents = []
@@ -388,10 +449,10 @@ class HommeyWebInstance:
             return bool(data.get("answer") or data.get("content") or data.get("data", {}).get("answer"))
         return any(data.get(key) for key in ("answer", "content", "result", "message", "summary", "itinerary", "preferences"))
 
-    async def stream_message(self, message: str):
+    async def stream_message(self, message: str, request_id: str | None = None):
         """Yield JSON-serializable progress and response events for Web streaming."""
         yield {"type": "status", "message": "processing"}
-        result = await self.process_message(message)
+        result = await self.process_message(message, request_id=request_id)
 
         agents = result.get("agents", [])
         if agents:
@@ -434,27 +495,33 @@ class HommeyWebInstance:
         """构建上下文消息（可与其他异步任务并行）"""
         from agentscope.message import Msg
 
-        long_term_summary = await self._get_cached_summary(message)
+        long_term_summary = await self._get_cached_summary()
+        relevant_trip_context = self._get_relevant_trip_context(message)
         recent_context = self.memory_manager.short_term.get_recent_context(n_turns=5)
 
         context_messages = []
         active_trip = self.memory_manager.get_active_trip()
+        memory_parts = []
         if active_trip:
+            memory_parts.extend(["【当前出差任务】", json.dumps(active_trip, ensure_ascii=False)])
+        if long_term_summary:
+            memory_parts.append(long_term_summary)
+        if relevant_trip_context:
+            memory_parts.append(relevant_trip_context)
+        if memory_parts:
             context_messages.append(Msg(
                 name="system",
-                content="【当前出差任务】\n" + json.dumps(active_trip, ensure_ascii=False),
+                content=wrap_untrusted_memory("\n".join(memory_parts)),
                 role="system",
             ))
-        if long_term_summary:
-            context_messages.append(Msg(name="system", content=long_term_summary, role="system"))
         for msg in recent_context:
             context_messages.append(Msg(name=msg["role"], content=msg["content"], role=msg["role"]))
         context_messages.append(Msg(name="user", content=message, role="user"))
 
         return context_messages
 
-    async def _get_long_term_summary(self, user_input: str = "") -> str:
-        """生成长期记忆摘要"""
+    async def _get_long_term_summary(self) -> str:
+        """Generate query-independent profile and historical-session summary."""
         summary_parts = []
         prefs = self.memory_manager.long_term.get_preference()
         if prefs:
@@ -473,12 +540,18 @@ class HommeyWebInstance:
             summary_parts.append("\n【历史会话总结】")
             summary_parts.append(chat_summary)
 
+        return "\n".join(summary_parts) if summary_parts else ""
+
+    def _get_relevant_trip_context(self, user_input: str) -> str:
+        """Select recent and query-relevant trips without contaminating the static cache."""
+        summary_parts = []
         all_trips = self.memory_manager.long_term.get_trip_history(limit=None)
-        active_trip = self.memory_manager.get_active_trip()
-        if active_trip:
-            summary_parts.append("\n【当前出差任务】")
-            summary_parts.append(json.dumps(active_trip, ensure_ascii=False))
         if all_trips:
+            all_trips = sorted(
+                all_trips,
+                key=lambda item: item.get("timestamp", "") or "",
+                reverse=True,
+            )
             relevant_trips = []
             other_trips = []
             for trip in all_trips:
@@ -498,8 +571,8 @@ class HommeyWebInstance:
                     purpose = trip.get("purpose", "")
                     mark = "✦ " if trip in relevant_trips else ""
                     summary_parts.append(f"{i}. {mark}{origin} → {destination} ({start_date}) - {purpose}")
-
-        return "\n".join(summary_parts) if summary_parts else ""
+            return "\n".join(summary_parts) if summary_parts else ""
+        return ""
 
     async def _handle_chitchat(self, user_input: str) -> str:
         """闲聊兜底"""
@@ -548,10 +621,20 @@ class HommeyWebInstance:
         if not results:
             return "✓ 好的，我已收到。"
         lines = []
+        planning_complete = any(
+            item.get("agent_name") == "itinerary_planning" and item.get("status") == "success"
+            for item in results
+        )
+        deferred_notes = []
         for result in results:
             agent_name = result.get("agent_name", "")
             status = result.get("status", "")
             data = result.get("data", {})
+            if planning_complete and agent_name in {"event_collection", "rag_knowledge", "information_query"}:
+                continue
+            if planning_complete and agent_name == "trip_compliance" and data.get("verdict") == "unknown":
+                deferred_notes.append("📌 提醒：未检索到足以确认合规性的适用制度，请在提交前人工确认。")
+                continue
             if status == "error":
                 error_msg = data.get("error", "未知错误")
                 display = AGENT_DISPLAY_NAMES.get(agent_name, agent_name)
@@ -562,7 +645,7 @@ class HommeyWebInstance:
             text = self._format_agent_result(agent_name, data)
             if text:
                 lines.append(text)
-        return "\n".join(lines).strip()
+        return "\n".join(lines + deferred_notes).strip()
 
     def _format_agent_result(self, agent_name: str, data: dict) -> str:
         """格式化单个智能体输出"""
@@ -668,6 +751,20 @@ class HommeyWebInstance:
             start_date = data.get("start_date") or data.get("data", {}).get("start_date")
             end_date = data.get("end_date") or data.get("data", {}).get("end_date")
             missing_info = data.get("missing_info") or data.get("data", {}).get("missing_info") or []
+            optional_info = data.get("optional_info") or data.get("data", {}).get("optional_info") or []
+            field_labels = {
+                "origin": "出发地",
+                "destination": "目的地",
+                "start_date": "出发日期（如：7月14日）",
+                "end_date": "返程日期",
+                "duration_days": "出差天数",
+                "duration_days_or_end_date": "出差天数或返程日期",
+                "trip_purpose": "出差目的（如：拜访客户、参加会议）",
+                "work_location": "客户/会议地点",
+                "work_schedule": "会面或工作时间",
+            }
+            missing_labels = [field_labels.get(item, str(item)) for item in missing_info]
+            optional_labels = [field_labels.get(item, str(item)) for item in optional_info]
             parts = []
             if destination or origin:
                 parts.append("✓ **已收集行程信息**")
@@ -679,8 +776,10 @@ class HommeyWebInstance:
                     parts.append(f"  • 出发日期: `{start_date}`")
                 if end_date:
                     parts.append(f"  • 返程日期: `{end_date}`")
-            if missing_info:
-                parts.append(f"💡 还需要补充: {', '.join(missing_info)}")
+            if missing_labels:
+                parts.append(f"💡 为开始生成行程，请补充：{'；'.join(missing_labels)}")
+            if optional_labels:
+                parts.append(f"可选补充（有助于优化安排）：{'；'.join(optional_labels)}")
             return "\n".join(parts) if parts else ""
 
         # Information query

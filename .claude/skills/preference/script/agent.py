@@ -20,13 +20,13 @@ logger = logging.getLogger(__name__)
 class PreferenceAgent(AgentBase):
     """偏好智能体"""
 
-    def __init__(self, name: str = "PreferenceAgent", model=None, memory_manager=None, **kwargs):
+    def __init__(self, name: str = "PreferenceAgent", model=None, memory_manager=None, skills_root=None, **kwargs):
         super().__init__()
         self.name = name
         self.model = model
         self.memory_manager = memory_manager
         from utils.skill_loader import SkillLoader
-        self.skill_loader = SkillLoader()
+        self.skill_loader = SkillLoader(skills_root)
 
     async def reply(self, x: Optional[Union[Msg, List[Msg]]] = None) -> Msg:
         if x is None:

@@ -1,6 +1,6 @@
 ---
 name: mcp-tool
-description: Use this skill when the user needs to interact with external tools via the Model Context Protocol (MCP). Triggers when user asks to save/read files, search external APIs, or any operation requiring MCP-connected tools. This skill routes tool calls to the MCPManager which manages connections to external MCP servers.
+description: Route an exact MCP server, tool, and argument request only after the caller has independently authorized that operation in an internal business-travel workflow. Do not use for general filesystem access, open-ended external actions, or inferred tool calls.
 ---
 
 # MCP Tool (外部工具调用)
@@ -9,8 +9,8 @@ description: Use this skill when the user needs to interact with external tools 
 
 ## When to Use
 
-- 用户说「保存到文件」「读取文件」「导出行程」「列出文件」等
-- 用户需要任何 MCP Server 提供的工具能力
+- 上游已经提供明确的 `server_name`、`tool_name` 和参数
+- 对应操作已经由调用方完成独立授权
 
 ## Agent
 
@@ -24,3 +24,9 @@ description: Use this skill when the user needs to interact with external tools 
 2. Orchestrator 调度到 `MCPToolAgent`
 3. MCPToolAgent 解析参数 → 调用 `mcp_manager.call_tool(server, tool, arguments)`
 4. 返回结果给 Orchestrator 聚合
+
+## 安全边界
+
+- 当前执行器不实现逐工具授权策略；启用该 Skill 前必须由部署方限制可连接的 MCP Server 和工具。
+- 不根据自然语言自行扩大参数、选择额外工具或连续执行未授权操作。
+- 不执行付款、预订、审批、报销提交或凭据读取。

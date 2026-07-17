@@ -1,7 +1,5 @@
-name: check-trip-compliance
 version: 1.0.0
 display_name: 合规行程检查
-description: 依据企业差旅知识库证据检查当前或拟定行程的交通、住宿、补贴、审批和报销要求；无证据时输出无法确认。
 category: business
 intent: trip_compliance
 agent_name: trip_compliance

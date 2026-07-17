@@ -19,6 +19,13 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.
 
 logger = logging.getLogger(__name__)
 
+PLANNING_REQUIRED_FIELDS = (
+    "origin",
+    "destination",
+    "start_date",
+    "trip_purpose",
+)
+
 
 class EventCollectionAgent(AgentBase):
     """事项收集智能体"""
@@ -184,6 +191,20 @@ class EventCollectionAgent(AgentBase):
                 "extracted_count": 0,
                 "error": str(e)
             }
+
+        # 行程规划必须等到核心事项完整后再调用外部查询和规划 Agent。
+        planning_missing = []
+        for field in PLANNING_REQUIRED_FIELDS:
+            if not result.get(field):
+                planning_missing.append(field)
+        if not result.get("end_date") and not result.get("duration_days"):
+            planning_missing.append("duration_days_or_end_date")
+        optional_info = [
+            field for field in ("work_location", "work_schedule") if not result.get(field)
+        ]
+        result["missing_info"] = planning_missing
+        result["optional_info"] = optional_info
+        result["planning_ready"] = not planning_missing
 
         # 返回JSON字符串格式
         return Msg(name=self.name, content=json.dumps(result, ensure_ascii=False), role="assistant")
