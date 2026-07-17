@@ -1,7 +1,5 @@
-name: query-info
 version: 1.0.0
 display_name: 差旅外部信息
-description: 查询与当前公司差旅直接相关的天气和公开交通信息，不作为通用联网搜索能力。
 category: capability
 intent: information_query
 agent_name: information_query

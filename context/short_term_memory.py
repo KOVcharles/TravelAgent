@@ -29,6 +29,7 @@ class ShortTermMemory:
         redis_password: str = None,
         key_prefix: str = "hommey:short_term",
         backend: str = "memory",
+        redis_ttl_sec: int = 86400,
     ):
         """
         初始化短期记忆
@@ -49,7 +50,10 @@ class ShortTermMemory:
         self.max_turns = max_turns
         self.backend = backend.lower()
         self.redis_key = f"{key_prefix}:{user_id}:{session_id}"
+        self.redis_version_key = f"{self.redis_key}:version"
+        self.redis_ttl_sec = max(int(redis_ttl_sec), 1)
         self.messages: List[Dict[str, Any]] = []
+        self.message_version = 0
         self.redis_client = None
 
         if self.backend == "redis":
@@ -84,11 +88,17 @@ class ShortTermMemory:
         # 追加并裁剪，保持最近 max_turns 轮（2 * max_turns 条消息）
         max_messages = self.max_turns * 2
         if self.backend == "redis":
-            self.redis_client.rpush(self.redis_key, json.dumps(message, ensure_ascii=False))
-            self.redis_client.ltrim(self.redis_key, -max_messages, -1)
+            pipeline = self.redis_client.pipeline(transaction=True)
+            pipeline.rpush(self.redis_key, json.dumps(message, ensure_ascii=False))
+            pipeline.ltrim(self.redis_key, -max_messages, -1)
+            pipeline.incr(self.redis_version_key)
+            pipeline.expire(self.redis_key, self.redis_ttl_sec)
+            pipeline.expire(self.redis_version_key, self.redis_ttl_sec)
+            pipeline.execute()
         else:
             self.messages.append(message)
             self.messages = self.messages[-max_messages:]
+            self.message_version += 1
 
         logger.debug(f"Added message to short-term memory: {role}")
 
@@ -137,15 +147,17 @@ class ShortTermMemory:
     def clear(self):
         """清空短期记忆"""
         if self.backend == "redis":
-            self.redis_client.delete(self.redis_key)
+            self.redis_client.delete(self.redis_key, self.redis_version_key)
         else:
             self.messages.clear()
+            self.message_version = 0
         logger.info("Short-term memory cleared")
 
     def get_statistics(self) -> Dict[str, Any]:
         """获取统计信息"""
         if self.backend == "redis":
             total_messages = self.redis_client.llen(self.redis_key)
+            message_version = int(self.redis_client.get(self.redis_version_key) or 0)
             oldest_message_time = None
             newest_message_time = None
 
@@ -158,11 +170,13 @@ class ShortTermMemory:
                     newest_message_time = json.loads(last).get("timestamp")
         else:
             total_messages = len(self.messages)
+            message_version = self.message_version
             oldest_message_time = self.messages[0].get("timestamp") if self.messages else None
             newest_message_time = self.messages[-1].get("timestamp") if self.messages else None
 
         return {
             "total_messages": total_messages,
+            "message_version": message_version,
             "max_turns": self.max_turns,
             "backend": self.backend,
             "oldest_message_time": oldest_message_time,

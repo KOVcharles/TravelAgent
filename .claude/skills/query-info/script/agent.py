@@ -9,6 +9,7 @@
 from agentscope.agent import AgentBase
 from agentscope.message import Msg
 from typing import Optional, Union, List, Dict, Any
+import asyncio
 import json
 import logging
 import re
@@ -77,12 +78,12 @@ class InformationQueryAgent(AgentBase):
     - 差旅标准查询由独立的 RAGKnowledgeAgent 处理
     """
 
-    def __init__(self, name: str = "InformationQueryAgent", model=None, **kwargs):
+    def __init__(self, name: str = "InformationQueryAgent", model=None, skills_root=None, **kwargs):
         super().__init__()
         self.name = name
         self.model = model
         from utils.skill_loader import SkillLoader
-        self.skill_loader = SkillLoader()
+        self.skill_loader = SkillLoader(skills_root)
 
     async def reply(self, x: Optional[Union[Msg, List[Msg]]] = None) -> Msg:
         if x is None:
@@ -91,15 +92,21 @@ class InformationQueryAgent(AgentBase):
         # 解析输入
         content = x.content if not isinstance(x, list) else x[-1].content
 
+        payload = {}
         if isinstance(content, str):
             try:
-                data = json.loads(content)
-                context = data.get("context", {})
+                payload = json.loads(content)
+                context = payload.get("context", {})
                 user_query = context.get("rewritten_query", "") or content
             except json.JSONDecodeError:
                 user_query = content
         else:
             user_query = str(content)
+
+        trip = self._trip_from_previous_results(payload.get("previous_results") or [])
+        if trip:
+            result = await self._trip_information_query(trip)
+            return Msg(name=self.name, content=json.dumps(result, ensure_ascii=False), role="assistant")
 
         # 天气类问题优先走 wttr.in，避免通用搜索返回低质结果
         if self._is_weather_query(user_query):
@@ -126,6 +133,51 @@ class InformationQueryAgent(AgentBase):
                 }
 
         return Msg(name=self.name, content=json.dumps(result, ensure_ascii=False), role="assistant")
+
+    @staticmethod
+    def _trip_from_previous_results(previous_results: List[Dict]) -> Optional[Dict[str, Any]]:
+        for item in reversed(previous_results):
+            if item.get("agent_name") != "event_collection":
+                continue
+            data = (item.get("result") or {}).get("data") or {}
+            if data.get("planning_ready") and data.get("origin") and data.get("destination"):
+                return data
+        return None
+
+    async def _trip_information_query(self, trip: Dict[str, Any]) -> Dict[str, Any]:
+        """Fetch weather and route-level public transport context for a complete trip."""
+        origin, destination = trip["origin"], trip["destination"]
+        start_date = trip.get("start_date", "")
+        end_date = trip.get("end_date") or f"约{trip.get('duration_days')}天"
+        weather_query = f"{destination} {start_date} 天气"
+        transport_query = (
+            f"{origin}到{destination} {start_date} 商务出行 高铁 航班 交通方式 "
+            "官方时刻与机场或车站接驳"
+        )
+        weather, transport = await asyncio.gather(
+            self._weather_query(weather_query),
+            self._web_search(transport_query),
+            return_exceptions=True,
+        )
+        weather_data = weather if isinstance(weather, dict) else {"query_success": False, "results": {"message": str(weather)}}
+        transport_data = transport if isinstance(transport, dict) else {"query_success": False, "results": {"message": str(transport)}}
+        weather_summary = (weather_data.get("results") or {}).get("summary") or (weather_data.get("results") or {}).get("message")
+        transport_summary = (transport_data.get("results") or {}).get("summary") or (transport_data.get("results") or {}).get("message")
+        summary_parts = [f"行程外部信息：{origin} → {destination}（{start_date} 至 {end_date}）。"]
+        if weather_summary:
+            summary_parts.append(f"天气：{weather_summary}")
+        if transport_summary:
+            summary_parts.append(f"交通：{transport_summary}")
+        summary_parts.append("公开信息仅供行程建议，请通过铁路、航司或授权差旅渠道核验时刻、票价和可订状态。")
+        return {
+            "query_type": "行程外部信息",
+            "query_success": bool(weather_data.get("query_success") or transport_data.get("query_success")),
+            "results": {
+                "summary": "\n".join(summary_parts),
+                "weather": weather_data.get("results") or {},
+                "transport": transport_data.get("results") or {},
+            },
+        }
 
     def _is_weather_query(self, query: str) -> bool:
         """简单判断是否为天气类问题。"""

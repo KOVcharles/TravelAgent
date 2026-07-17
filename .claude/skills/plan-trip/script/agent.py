@@ -20,6 +20,75 @@ from utils.json_parser import robust_json_parse, extract_json_from_async_respons
 logger = logging.getLogger(__name__)
 
 
+def normalize_planning_result(result: Dict[str, Any]) -> Dict[str, Any]:
+    """Normalize common model output variants to the public itinerary contract."""
+    if not isinstance(result, dict) or isinstance(result.get("itinerary"), dict):
+        return result
+
+    trip = result.get("trip")
+    if not isinstance(trip, dict):
+        return result
+
+    transport = trip.get("transport_recommendation") or {}
+    if isinstance(transport, dict):
+        transport = {
+            "preferred": transport.get("mode") or transport.get("preferred"),
+            "reason": transport.get("advice") or transport.get("reason"),
+            "verification": transport.get("note") or transport.get("verification"),
+        }
+
+    lodging = trip.get("lodging_advice") or ""
+    if isinstance(lodging, dict):
+        lodging = "\n".join(
+            str(value) for value in (
+                lodging.get("hotel"),
+                lodging.get("location_advice"),
+                lodging.get("note"),
+            ) if value
+        )
+
+    daily_plans = []
+    for index, day in enumerate(trip.get("daily_schedule") or [], start=1):
+        if not isinstance(day, dict):
+            continue
+        activities = []
+        for activity in day.get("activities") or []:
+            if not isinstance(activity, dict):
+                continue
+            activities.append({
+                "time": activity.get("time", ""),
+                "activity": activity.get("activity") or activity.get("description", ""),
+                "description": activity.get("details", ""),
+                "transport": activity.get("transport", ""),
+            })
+        daily_plans.append({
+            "day": index,
+            "date": day.get("date", ""),
+            "activities": activities,
+        })
+
+    notes = []
+    if trip.get("weather_advice"):
+        notes.append(trip["weather_advice"])
+    compliance_note = (trip.get("compliance_check") or {}).get("note")
+    if compliance_note:
+        notes.append(compliance_note)
+
+    duration = trip.get("duration_days") or ""
+    result["itinerary"] = {
+        "title": f"{trip.get('origin', '')}至{trip.get('destination', '')}出差行程".strip("至"),
+        "duration": f"{duration}天" if duration else "待确认",
+        "transport_recommendation": transport,
+        "lodging_advice": lodging,
+        "daily_plans": daily_plans,
+        "notes": notes,
+        "reimbursement_checklist": trip.get("reimbursement_checklist") or [],
+        "missing_info": trip.get("missing_info") or [],
+    }
+    result["planning_complete"] = True
+    return result
+
+
 class ItineraryPlanningAgent(AgentBase):
     """
     行程规划智能体（主协调）
@@ -28,12 +97,12 @@ class ItineraryPlanningAgent(AgentBase):
     整合三层编排智能体的结果，生成完整行程计划
     """
 
-    def __init__(self, name: str = "ItineraryPlanningAgent", model=None, **kwargs):
+    def __init__(self, name: str = "ItineraryPlanningAgent", model=None, skills_root=None, **kwargs):
         super().__init__()
         self.name = name
         self.model = model
         from utils.skill_loader import SkillLoader
-        self.skill_loader = SkillLoader()
+        self.skill_loader = SkillLoader(skills_root)
 
     async def reply(self, x: Optional[Union[Msg, List[Msg]]] = None) -> Msg:
         if x is None:
@@ -121,7 +190,20 @@ class ItineraryPlanningAgent(AgentBase):
 【任务说明与指南】
 {skill_instruction}
 
-请直接输出 JSON 格式的行程规划。
+严格只输出以下 JSON 契约，不要使用 trip、daily_schedule 等替代字段：
+{{
+  "itinerary": {{
+    "title": "",
+    "duration": "",
+    "transport_recommendation": {{"preferred": "", "reason": "", "verification": ""}},
+    "lodging_advice": "",
+    "daily_plans": [{{"day": 1, "date": "", "activities": [{{"time": "", "activity": "", "description": "", "transport": ""}}]}}],
+    "notes": [],
+    "reimbursement_checklist": [],
+    "missing_info": []
+  }},
+  "planning_complete": true
+}}
 """
 
         try:
@@ -166,6 +248,7 @@ class ItineraryPlanningAgent(AgentBase):
 
             if result is None:
                 raise ValueError("Parsed result is None")
+            result = normalize_planning_result(result)
 
         except Exception as e:
             logger.error(f"Itinerary planning failed: {e}")

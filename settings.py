@@ -121,6 +121,8 @@ MEMORY_CONFIG = {
     "short_term": {
         "backend": os.getenv("HOMMEY_SHORT_TERM_BACKEND", "memory").lower(),
         "max_turns": _int_env("HOMMEY_SHORT_TERM_MAX_TURNS", 10),
+        "session_idle_timeout_sec": _int_env("HOMMEY_SESSION_IDLE_TIMEOUT_SEC", 600),
+        "redis_ttl_sec": _int_env("HOMMEY_SESSION_REDIS_TTL_SEC", 86400),
         "redis_host": os.getenv("HOMMEY_REDIS_HOST", "127.0.0.1"),
         "redis_port": _int_env("HOMMEY_REDIS_PORT", 6379),
         "redis_db": _int_env("HOMMEY_REDIS_DB", 0),
@@ -131,6 +133,14 @@ MEMORY_CONFIG = {
         "backend": os.getenv("HOMMEY_LONG_TERM_BACKEND", "file").lower(),
         "storage_path": os.getenv("HOMMEY_MEMORY_STORAGE_PATH", "data/memory"),
         "postgres_dsn": os.getenv("HOMMEY_POSTGRES_DSN", ""),
+    },
+    "safety": {
+        "enabled": _bool_env("HOMMEY_MEMORY_SAFETY_ENABLED", True),
+    },
+    "v2": {
+        "enabled": _bool_env("HOMMEY_MEMORY_V2_ENABLED", False),
+        "dual_write": _bool_env("HOMMEY_MEMORY_V2_DUAL_WRITE", False),
+        "read_mode": os.getenv("HOMMEY_MEMORY_V2_READ_MODE", "legacy").lower(),
     },
 }
 

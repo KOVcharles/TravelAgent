@@ -24,6 +24,7 @@ import uuid
 
 from core.skill_store import SkillPlatformStore
 from utils.skill_loader import SkillLoader
+from utils.memory_safety import filter_safe_memory_mapping, is_safe_preference_value
 
 logger = logging.getLogger(__name__)
 
@@ -52,11 +53,11 @@ class OrchestrationAgent(AgentBase):
         self.agent_registry = agent_registry or {}
         self.memory_manager = memory_manager
         self.skill_store = skill_store or SkillPlatformStore()
-        self.skill_manifests = SkillLoader().load_manifests()
+        self.skill_definitions = SkillLoader().load_definitions()
         self._agent_skill_map = {
-            manifest.agent_name: manifest.name
-            for manifest in self.skill_manifests.values()
-            if manifest.agent_name
+            definition.agent_name: definition.name
+            for definition in self.skill_definitions.values()
+            if definition.agent_name
         }
 
     def register_agent(self, agent_name: str, agent: AgentBase):
@@ -157,6 +158,8 @@ class OrchestrationAgent(AgentBase):
                     batch_results = await self._execute_parallel_agents(parallel_tasks, context, results)
                     results.extend(batch_results)
                     parallel_tasks = []
+                    if self._pause_incomplete_trip_planning(sorted_schedule, results):
+                        break
 
             current_priority = priority
             parallel_tasks.append(task)
@@ -165,6 +168,8 @@ class OrchestrationAgent(AgentBase):
         if parallel_tasks:
             batch_results = await self._execute_parallel_agents(parallel_tasks, context, results)
             results.extend(batch_results)
+
+        await self._continue_ready_trip_planning(sorted_schedule, context, results)
 
         # 聚合结果
         final_result = self._aggregate_results(results, intention_data)
@@ -180,6 +185,54 @@ class OrchestrationAgent(AgentBase):
             content=json.dumps(final_result, ensure_ascii=False),
             role="assistant"
         )
+
+    @staticmethod
+    def _pause_incomplete_trip_planning(schedule: List[Dict], results: List[Dict]) -> bool:
+        """Stop a planning workflow after collection until required facts exist."""
+        if not any(item.get("agent_name") == "itinerary_planning" for item in schedule):
+            return False
+        event_result = next(
+            (item for item in reversed(results) if item.get("agent_name") == "event_collection"),
+            None,
+        )
+        if not event_result:
+            return False
+        runtime_result = event_result.get("result") or {}
+        data = runtime_result.get("data") if isinstance(runtime_result, dict) else {}
+        return isinstance(data, dict) and data.get("planning_ready") is False
+
+    async def _continue_ready_trip_planning(
+        self,
+        schedule: List[Dict],
+        context: Dict[str, Any],
+        results: List[Dict],
+    ) -> None:
+        """Resume an active trip as soon as its final required fact is collected."""
+        if any(item.get("agent_name") == "itinerary_planning" for item in schedule):
+            return
+        event_result = next(
+            (item for item in reversed(results) if item.get("agent_name") == "event_collection"),
+            None,
+        )
+        if not event_result:
+            return
+        data = (event_result.get("result") or {}).get("data") or {}
+        if not isinstance(data, dict) or data.get("planning_ready") is not True:
+            return
+
+        plan_definition = self.skill_definitions.get("plan-trip")
+        if not plan_definition:
+            return
+        follow_up = [
+            step.model_dump()
+            for step in plan_definition.execution
+            if step.agent_name != "event_collection"
+        ]
+        follow_up, _ = self._filter_enabled_schedule(follow_up)
+        for priority in sorted({item.get("priority", 999) for item in follow_up}):
+            batch = [item for item in follow_up if item.get("priority", 999) == priority]
+            batch_results = await self._execute_parallel_agents(batch, context, results)
+            results.extend(batch_results)
 
     def _prepare_context(self, intention_data: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -216,8 +269,8 @@ class OrchestrationAgent(AgentBase):
         disabled = []
         for task in schedule:
             skill_name = self._agent_skill_map.get(task.get("agent_name"))
-            manifest = self.skill_manifests.get(skill_name) if skill_name else None
-            default = manifest.enabled_by_default if manifest else True
+            definition = self.skill_definitions.get(skill_name) if skill_name else None
+            default = definition.enabled_by_default if definition else True
             if skill_name and not self.skill_store.is_enabled(skill_name, default):
                 disabled.append(skill_name)
                 continue
@@ -236,8 +289,8 @@ class OrchestrationAgent(AgentBase):
         for result in results:
             agent_name = result.get("agent_name")
             skill_name = self._agent_skill_map.get(agent_name)
-            manifest = self.skill_manifests.get(skill_name) if skill_name else None
-            if not manifest:
+            definition = self.skill_definitions.get(skill_name) if skill_name else None
+            if not definition:
                 continue
             runtime_result = result.get("result") or {}
             data = runtime_result.get("data") if isinstance(runtime_result, dict) else {}
@@ -248,7 +301,7 @@ class OrchestrationAgent(AgentBase):
                 request_id=request_id,
                 user_id=user_id,
                 skill_name=skill_name,
-                skill_version=manifest.version,
+                skill_version=definition.version,
                 status=runtime_result.get("status", "unknown"),
                 duration_ms=int(float(runtime_result.get("duration_sec") or 0) * 1000),
                 input_summary=input_summary,
@@ -478,6 +531,8 @@ class OrchestrationAgent(AgentBase):
                 "data": result["result"].get("data", {})
             })
 
+        return aggregated
+
         # 检查是否有错误
         errors = [r for r in results if r["result"].get("status") == "error"]
         if errors:
@@ -512,6 +567,7 @@ class OrchestrationAgent(AgentBase):
 
             if agent_name == "event_collection" and isinstance(data, dict):
                 event_data = data.get("data") if isinstance(data.get("data"), dict) else data
+                event_data = filter_safe_memory_mapping(event_data)
                 if any(event_data.get(key) for key in ("origin", "destination", "start_date", "end_date", "work_location")):
                     self.memory_manager.update_active_trip(event_data)
 
@@ -530,6 +586,9 @@ class OrchestrationAgent(AgentBase):
                         pref_action = pref_item.get("action", "replace")  # 默认覆盖
 
                         if not pref_type or not pref_value:
+                            continue
+                        if not is_safe_preference_value(pref_value):
+                            logger.warning("Skipped sensitive preference value for %s", pref_type)
                             continue
 
                         # 根据 action 决定操作
@@ -558,6 +617,9 @@ class OrchestrationAgent(AgentBase):
                 elif isinstance(preferences_data, dict):
                     for pref_type, value in preferences_data.items():
                         if value and pref_type != "has_preferences" and pref_type != "error":
+                            if not is_safe_preference_value(value):
+                                logger.warning("Skipped sensitive preference value for %s", pref_type)
+                                continue
                             self.memory_manager.long_term.save_preference(pref_type, value)
                             logger.info(f"Updated {pref_type}: {value} (legacy format)")
 
@@ -573,6 +635,9 @@ class OrchestrationAgent(AgentBase):
                     for r in results:
                         if r["agent_name"] == "event_collection":
                             event_data = r["result"].get("data", {})
+                            if isinstance(event_data.get("data"), dict):
+                                event_data = event_data["data"]
+                            event_data = filter_safe_memory_mapping(event_data)
                             break
 
                     # 从 event_data 获取行程信息
@@ -589,8 +654,10 @@ class OrchestrationAgent(AgentBase):
                             "destination": destination,
                             "start_date": start_date,
                             "end_date": end_date,
-                            "purpose": purpose
+                            "purpose": purpose,
+                            "request_id": getattr(self.memory_manager, "current_request_id", None),
                         })
+                        self.memory_manager.complete_active_trip(reason="planning_completed")
                         logger.info(f"Saved trip to long-term memory: {origin} -> {destination}")
 
         logger.info("Memory updated after orchestration")

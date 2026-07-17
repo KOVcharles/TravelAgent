@@ -58,18 +58,24 @@ def create_auth_router():
     @router.post("/auth/register", response_model=UserResponse, status_code=201)
     async def register(data: RegisterRequest):
         """注册：邮箱 + 密码 → bcrypt 哈希落库；重复邮箱 → 409。"""
+        email = data.email.strip()
+        if not email or not data.password:
+            raise ValidationError("BAD_REQUEST", "请输入邮箱和密码")
         with get_conn() as conn:
             apply_migration(conn)  # 幂等：首次注册自动建表
-            if get_user_by_email(conn, str(data.email)):
+            if get_user_by_email(conn, email):
                 raise BusinessError("EMAIL_ALREADY_EXISTS", "该邮箱已注册", status_code=409)
-            user = create_user(conn, str(data.email), hash_password(data.password))
+            user = create_user(conn, email, hash_password(data.password))
         return UserResponse(id=user.id, email=user.email)
 
     @router.post("/auth/login", response_model=TokenResponse)
     async def login_jwt(data: RegisterRequest):
         """登录：校验密码 → 签发 access + refresh；任一失败 → 401（文案不区分原因）。"""
+        email = data.email.strip()
+        if not email or not data.password:
+            raise ValidationError("BAD_REQUEST", "请输入邮箱和密码")
         with get_conn() as conn:
-            user = get_user_by_email(conn, str(data.email))
+            user = get_user_by_email(conn, email)
         # 常量时间：用户不存在也对假哈希跑一次 verify，防邮箱枚举探针。
         stored_hash = user.password_hash if user else _DUMMY_PASSWORD_HASH
         ok = verify_password(data.password, stored_hash)

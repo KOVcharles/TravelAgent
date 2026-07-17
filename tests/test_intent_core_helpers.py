@@ -20,6 +20,12 @@ async def chunked_response():
     yield "}"
 
 
+async def cumulative_chunked_response():
+    yield "{"
+    yield '{"a":'
+    yield '{"a": 1}'
+
+
 def _valid_intent_result(**overrides):
     data = {
         "routing": {
@@ -53,6 +59,7 @@ def test_extract_text_from_response_shapes():
     assert asyncio.run(extract_text_from_response(TextResponse())) == '{"ok": true}'
     assert asyncio.run(extract_text_from_response(ContentResponse())) == '{"ok": true}'
     assert asyncio.run(extract_text_from_response(chunked_response())) == '{"a": 1}'
+    assert asyncio.run(extract_text_from_response(cumulative_chunked_response())) == '{"a": 1}'
 
 
 def test_parse_json_object_handles_common_wrappers():

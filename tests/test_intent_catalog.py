@@ -49,14 +49,19 @@ def test_display_names_complete():
 
 
 def test_catalog_matches_discovered_skills():
-    """目录中的 skill 集合必须与 SkillLoader 实际发现的 skill 完全一致（防漂移）。"""
+    """意图目录必须覆盖所有声明了 Hommey intent 的 Skill。"""
     loader = SkillLoader()
-    discovered = set(loader.load_skills().keys())
+    definitions = loader.load_definitions()
+    intent_backed = {
+        definition.name
+        for definition in definitions.values()
+        if definition.intent
+    }
     catalog_skills = {info["skill"] for info in SKILL_INTENTS.values()}
-    assert catalog_skills == discovered, (
-        f"catalog skills != discovered skills. "
-        f"missing from catalog: {discovered - catalog_skills}; "
-        f"missing from skills dir: {catalog_skills - discovered}"
+    assert catalog_skills == intent_backed, (
+        f"catalog skills != intent-backed skills. "
+        f"missing from catalog: {intent_backed - catalog_skills}; "
+        f"missing from skill definitions: {catalog_skills - intent_backed}"
     )
 
 

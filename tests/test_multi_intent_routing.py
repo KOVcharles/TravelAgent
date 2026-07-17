@@ -31,8 +31,9 @@ def test_trip_and_policy_multi_intent_routes_to_both_schedule_paths():
 
     assert {"itinerary_planning", "rag_knowledge"} <= _intent_types(data)
     assert ("event_collection", 1) in _schedule(data)
-    assert ("rag_knowledge", 1) in _schedule(data)
-    assert ("itinerary_planning", 2) in _schedule(data)
+    assert ("rag_knowledge", 2) in _schedule(data)
+    assert ("information_query", 2) in _schedule(data)
+    assert ("itinerary_planning", 3) in _schedule(data)
     assert data["routing"]["mode"] == "multi"
     assert data["routing"]["should_call_skill"] is True
 
@@ -42,8 +43,8 @@ def test_trip_and_weather_multi_intent_routes_to_information_and_trip():
 
     assert {"itinerary_planning", "information_query"} <= _intent_types(data)
     assert ("event_collection", 1) in _schedule(data)
-    assert ("information_query", 1) in _schedule(data)
-    assert ("itinerary_planning", 2) in _schedule(data)
+    assert ("information_query", 2) in _schedule(data)
+    assert ("itinerary_planning", 3) in _schedule(data)
 
 
 def test_preference_and_trip_multi_intent_routes_to_preference_and_trip():
@@ -52,7 +53,7 @@ def test_preference_and_trip_multi_intent_routes_to_preference_and_trip():
     assert {"preference", "itinerary_planning"} <= _intent_types(data)
     assert ("preference", 1) in _schedule(data)
     assert ("event_collection", 1) in _schedule(data)
-    assert ("itinerary_planning", 2) in _schedule(data)
+    assert ("itinerary_planning", 3) in _schedule(data)
 
 
 def test_policy_query_with_business_trip_context_does_not_trigger_trip_schedule():
@@ -68,9 +69,10 @@ def test_trip_only_routes_to_event_collection_then_itinerary_planning():
     assert _intent_types(data) == {"itinerary_planning"}
     assert _schedule(data) == [
         ("event_collection", 1),
-        ("rag_knowledge", 1),
-        ("itinerary_planning", 2),
-        ("trip_compliance", 3),
+        ("rag_knowledge", 2),
+        ("information_query", 2),
+        ("itinerary_planning", 3),
+        ("trip_compliance", 4),
     ]
 
 
@@ -114,10 +116,11 @@ def test_low_confidence_intent_is_filtered_per_intent():
     assert data["intents"][1]["should_call_skill"] is False
     # The explicit low-confidence RAG intent is filtered, while the validated
     # plan-trip workflow still declares policy retrieval as a required step.
-    assert ("rag_knowledge", 1) in _schedule(data)
+    assert ("rag_knowledge", 2) in _schedule(data)
     assert _schedule(data) == [
         ("event_collection", 1),
-        ("rag_knowledge", 1),
-        ("itinerary_planning", 2),
-        ("trip_compliance", 3),
+        ("rag_knowledge", 2),
+        ("information_query", 2),
+        ("itinerary_planning", 3),
+        ("trip_compliance", 4),
     ]

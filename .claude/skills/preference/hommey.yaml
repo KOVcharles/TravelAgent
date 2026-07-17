@@ -1,7 +1,5 @@
-name: preference
 version: 1.0.0
 display_name: 差旅偏好管理
-description: 识别并保存与公司差旅相关的酒店、航司、座位、交通和常驻地偏好。
 category: capability
 intent: preference
 agent_name: preference

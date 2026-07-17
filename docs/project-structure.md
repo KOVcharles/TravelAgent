@@ -11,15 +11,15 @@ main boundaries explicit so later refactors can be done safely.
   - `orchestration_agent.py` schedules skill-backed agents and aggregates results.
   - `lazy_agent_registry.py` discovers and lazily loads skill plugins.
 - `.claude/skills/`: canonical runtime skill plugin directory for this branch.
-  - Each skill owns concise `SKILL.md` instructions, a validated `manifest.yaml`, and an optional `script/agent.py` implementation.
-  - Manifests declare versions, intent mapping, tool permissions, dependencies, schemas, and execution stages.
+  - Each skill owns a standard `SKILL.md`, an optional validated `hommey.yaml` extension, and an optional `script/agent.py` implementation.
+  - `SKILL.md` declares portable discovery metadata and instructions; `hommey.yaml` declares runtime versions, intent mapping, tool declarations, dependencies, schemas, and execution stages. Tool declarations are metadata, not an enforcement boundary.
   - The runtime path is configurable with `HOMMEY_SKILLS_ROOT`.
 - `context/`: short-term and long-term memory implementations.
 - `hommey_mcp/`: project-owned MCP client/server integration. This name avoids
   shadowing the third-party `mcp` protocol package.
 - `webui_new/`: current FastAPI web application.
 - `webui_new/skill_platform/`: administrator Skill registry, graph, settings, and trace service.
-- `core/skill_manifest.py`: machine-readable Skill contract.
+- `core/skill_definition.py`: standard Skill metadata and Hommey runtime-extension contract.
 - `core/skill_store.py`: PostgreSQL-backed Skill settings and sanitized execution traces.
 - `legacy/webui_gradio.py`: legacy Gradio web entry point retained for compatibility.
 - `cli.py`: command-line entry point.
@@ -46,16 +46,18 @@ main boundaries explicit so later refactors can be done safely.
 ```text
 User request
   -> domain guard
-  -> manifest-derived intent catalog
-  -> manifest-derived execution schedule
+  -> SKILL.md-derived capability catalog
+  -> hommey.yaml-derived intent and execution schedule
   -> lazy skill agent loading
   -> optional Skill enablement policy
   -> orchestration and sanitized trace recording
 ```
 
-The current business workflow composes `event-collection`, `ask-question`,
-`plan-trip`, and `check-trip-compliance`. Company policy remains RAG data; the
-Skill stores the reusable procedure for retrieving, evaluating, and citing it.
+The current business workflow first composes `event-collection`, then—once
+planning facts are complete—runs `ask-question` and `query-info` in parallel,
+followed by `plan-trip` and `check-trip-compliance`. Company policy remains RAG
+data; the Skill stores the reusable procedure for retrieving, evaluating, and
+citing it.
 
 ## Target Structure For A Later Refactor
 
@@ -81,6 +83,6 @@ docs/
 scripts/
 ```
 
-That migration should be done only after the current tests are aligned with
-the skill-plugin architecture, because several tests still import legacy agent
-module paths directly.
+That migration should be done only after the current runtime boundaries and
+Skill compatibility contracts are stable, so it can remain a packaging change
+instead of changing business behavior at the same time.

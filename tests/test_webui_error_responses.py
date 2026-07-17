@@ -212,7 +212,7 @@ async def test_stream_error_event_contract(client, monkeypatch):
     class FakeInstance:
         initialized = True
 
-        async def stream_message(self, _message):
+        async def stream_message(self, _message, request_id=None):
             yield {"type": "status", "message": "processing"}
             raise RuntimeError("api_key=secret-stream")
 

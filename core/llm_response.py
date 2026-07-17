@@ -32,6 +32,25 @@ def extract_text_from_dict(response: dict) -> str:
     return ""
 
 
+def merge_stream_text(current: str, incoming: str) -> str:
+    """Merge either delta or cumulative text chunks from a model stream.
+
+    OpenAI-compatible providers are not consistent: some yield only the new
+    delta while others yield the complete generated text on every chunk.  A
+    plain concatenation corrupts the latter (for example ``{"`` +
+    ``{"reasoning"``), which then makes otherwise valid JSON unparsable.
+    """
+    if not incoming:
+        return current
+    if not current:
+        return incoming
+    if incoming.startswith(current):
+        return incoming
+    if current.endswith(incoming):
+        return current
+    return current + incoming
+
+
 async def extract_text_from_response(response: Any) -> str:
     if response is None:
         return ""
@@ -41,19 +60,20 @@ async def extract_text_from_response(response: Any) -> str:
         return extract_text_from_dict(response)
 
     if hasattr(response, "__aiter__"):
-        parts = []
+        text = ""
         async for chunk in response:
             if isinstance(chunk, str):
-                parts.append(chunk)
+                incoming = chunk
             elif isinstance(chunk, dict):
-                parts.append(extract_text_from_dict(chunk))
+                incoming = extract_text_from_dict(chunk)
             elif hasattr(chunk, "text"):
-                parts.append(extract_content(chunk.text))
+                incoming = extract_content(chunk.text)
             elif hasattr(chunk, "content"):
-                parts.append(extract_content(chunk.content))
+                incoming = extract_content(chunk.content)
             else:
-                parts.append(str(chunk))
-        return "".join(parts)
+                incoming = str(chunk)
+            text = merge_stream_text(text, incoming)
+        return text
 
     if hasattr(response, "text"):
         return extract_content(response.text)

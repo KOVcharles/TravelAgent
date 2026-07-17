@@ -10,6 +10,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from utils.memory_safety import redact_sensitive_text
+
 KEY_VALUE_SECRET_RE = re.compile(
     r"(?i)(api[_-]?key|token|secret|password|passwd|pwd)(['\"]?\s*[:=]\s*['\"]?)[^,'\"\s}]+"
 )
@@ -23,4 +25,5 @@ def sanitize_for_log(value: Any, limit: int = 500) -> str:
     text = KEY_VALUE_SECRET_RE.sub(r"\1\2[REDACTED]", text)
     text = BEARER_TOKEN_RE.sub(r"\1[REDACTED]", text)
     text = POSTGRES_DSN_RE.sub(r"\1[REDACTED]\2", text)
+    text = redact_sensitive_text(text)
     return text if len(text) <= limit else text[:limit] + "...[truncated]"

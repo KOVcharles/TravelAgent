@@ -3,7 +3,7 @@
 
 用 fake 存储替换 `webui_new.routes.auth` 模块里导入的 storage 函数，避免依赖真实 PG；
 但 **密码哈希 / JWT 签发校验走真实实现**（passlib bcrypt + PyJWT），从而覆盖真正的
-加密链路。每个对外接口至少覆盖 正常路径 + 主要错误路径（201/200/409/401/422）。
+加密链路。每个对外接口至少覆盖正常路径与主要错误路径。
 """
 import jwt
 import pytest
@@ -93,16 +93,25 @@ def test_register_duplicate_email_is_409(client):
     assert r.json()["error"]["code"] == "EMAIL_ALREADY_EXISTS"
 
 
-def test_register_invalid_email_is_422(client):
+def test_register_accepts_nonstandard_email_for_testing(client):
     c, _ = client
-    r = c.post("/auth/register", json={"email": "not-an-email", "password": "supersecret-123"})
-    assert r.status_code == 422
+    r = c.post("/auth/register", json={"email": "test-user", "password": "supersecret-123"})
+    assert r.status_code == 201
+    assert r.json()["email"] == "test-user"
 
 
-def test_register_short_password_is_422(client):
+def test_register_accepts_short_password_for_testing(client):
     c, _ = client
-    r = c.post("/auth/register", json={"email": "x@example.com", "password": "short"})
-    assert r.status_code == 422
+    r = c.post("/auth/register", json={"email": "x", "password": "1"})
+    assert r.status_code == 201
+
+
+@pytest.mark.parametrize("email,password", [("", "1"), ("x", "")])
+def test_register_still_rejects_empty_credentials(client, email, password):
+    c, _ = client
+    r = c.post("/auth/register", json={"email": email, "password": password})
+    assert r.status_code == 400
+    assert r.json()["error"]["code"] == "BAD_REQUEST"
 
 
 # ---------------------------------------------------------------------------
@@ -120,6 +129,13 @@ def test_login_returns_access_and_refresh_tokens(client):
     assert body["refresh_token"]
     # 登录响应不回 id（canonical id 由 token sub 承载）
     assert "id" not in body
+
+
+def test_login_accepts_nonstandard_email_and_short_password(client):
+    c, _ = client
+    _register(c, email="dev-user", password="1")
+    r = c.post("/auth/login", json={"email": "dev-user", "password": "1"})
+    assert r.status_code == 200
 
 
 def test_login_wrong_password_is_401(client):

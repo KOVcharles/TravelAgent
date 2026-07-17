@@ -14,7 +14,7 @@ class SkillPlatformService:
         self.store = store or SkillPlatformStore()
 
     def list_skills(self) -> List[Dict[str, Any]]:
-        manifests = self.loader.load_manifests()
+        definitions = self.loader.load_definitions()
         settings = self.store.settings()
         runs = self.store.recent_runs(limit=500)
         metrics: Dict[str, Dict[str, Any]] = defaultdict(lambda: {"total": 0, "success": 0, "duration": 0})
@@ -25,13 +25,16 @@ class SkillPlatformService:
             metric["duration"] += int(run.get("duration_ms") or 0)
 
         result = []
-        for manifest in sorted(manifests.values(), key=lambda item: (item.catalog_order, item.name)):
-            setting = settings.get(manifest.name, {})
-            metric = metrics[manifest.name]
+        runtime_definitions = (
+            item for item in definitions.values() if item.hommey_configured
+        )
+        for definition in sorted(runtime_definitions, key=lambda item: (item.catalog_order, item.name)):
+            setting = settings.get(definition.name, {})
+            metric = metrics[definition.name]
             total = metric["total"]
             result.append({
-                **manifest.model_dump(),
-                "enabled": setting.get("enabled", manifest.enabled_by_default),
+                **definition.model_dump(),
+                "enabled": setting.get("enabled", definition.enabled_by_default),
                 "metrics": {
                     "runs": total,
                     "success_rate": round(metric["success"] / total, 4) if total else None,
@@ -49,13 +52,16 @@ class SkillPlatformService:
         return skill
 
     def dependency_graph(self) -> Dict[str, Any]:
-        manifests = self.loader.load_manifests()
+        definitions = self.loader.load_definitions()
         nodes = [
             {"id": item.name, "label": item.display_name, "category": item.category}
-            for item in manifests.values()
+            for item in definitions.values()
+            if item.hommey_configured
         ]
         edges = []
-        for item in manifests.values():
+        for item in definitions.values():
+            if not item.hommey_configured:
+                continue
             for dependency in item.requires:
                 edges.append({"source": dependency.skill, "target": item.name, "purpose": dependency.purpose})
         return {"nodes": nodes, "edges": edges}

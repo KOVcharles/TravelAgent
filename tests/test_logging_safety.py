@@ -27,3 +27,12 @@ def test_sanitize_for_log_redacts_postgres_password_and_truncates():
     assert "secret-db" not in sanitized
     assert "postgresql://hommey:[REDACTED]@localhost" in sanitized
     assert sanitized.endswith("...[truncated]")
+
+
+def test_sanitize_for_log_redacts_personal_identifiers():
+    sanitized = sanitize_for_log("contact user@example.com or 13800138000")
+
+    assert "user@example.com" not in sanitized
+    assert "13800138000" not in sanitized
+    assert "[REDACTED:EMAIL]" in sanitized
+    assert "[REDACTED:PHONE]" in sanitized

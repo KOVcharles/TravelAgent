@@ -33,11 +33,11 @@ class ComplianceOutput(BaseModel):
 
 
 class TripComplianceAgent(AgentBase):
-    def __init__(self, name: str = "trip_compliance", model=None, **kwargs):
+    def __init__(self, name: str = "trip_compliance", model=None, skills_root=None, **kwargs):
         super().__init__()
         self.name = name
         self.model = model
-        self.skill_loader = SkillLoader()
+        self.skill_loader = SkillLoader(skills_root)
 
     async def reply(self, x: Optional[Union[Msg, List[Msg]]] = None) -> Msg:
         payload = self._payload(x)
@@ -57,6 +57,10 @@ class TripComplianceAgent(AgentBase):
             return self._message(result)
 
         instructions = self.skill_loader.get_skill_content("check-trip-compliance") or ""
+        evidence_rules = self.skill_loader.get_skill_resource(
+            "check-trip-compliance",
+            "references/evidence-rules.md",
+        ) or ""
         prompt = f"""你是企业差旅行程合规检查器。严格基于给定证据输出 JSON，不使用常识补全制度。
 
 【出差事项】
@@ -70,6 +74,9 @@ class TripComplianceAgent(AgentBase):
 
 【Skill 指令】
 {instructions}
+
+【证据冲突与来源规则】
+{evidence_rules}
 
 每个确定结论必须引用 sources 中的来源。证据不足则标记 unknown。只输出 JSON。"""
         try:

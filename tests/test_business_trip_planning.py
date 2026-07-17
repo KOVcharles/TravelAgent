@@ -7,6 +7,30 @@ from utils.skill_loader import SkillLoader
 from webui_new.manager import HommeyWebInstance
 
 
+def test_trip_shaped_model_output_is_normalized_to_itinerary_contract():
+    registry = LazyAgentRegistry(model=None, cache={})
+    module = registry["itinerary_planning"].__class__.__module__
+    normalize = __import__(module, fromlist=["normalize_planning_result"]).normalize_planning_result
+
+    result = normalize(
+        {
+            "status": "success",
+            "trip": {
+                "origin": "北京",
+                "destination": "南昌",
+                "duration_days": 2,
+                "transport_recommendation": {"mode": "高铁", "advice": "优先高铁"},
+                "lodging_advice": {"hotel": "汉庭", "location_advice": "靠近客户地点"},
+                "daily_schedule": [{"date": "2026-07-14", "activities": [{"time": "09:00", "description": "拜访客户"}]}],
+            },
+        }
+    )
+
+    assert result["planning_complete"] is True
+    assert result["itinerary"]["title"] == "北京至南昌出差行程"
+    assert result["itinerary"]["daily_plans"][0]["activities"][0]["activity"] == "拜访客户"
+
+
 def test_plan_trip_skill_is_business_focused_and_advice_only():
     content = SkillLoader().get_skill_content("plan-trip")
 

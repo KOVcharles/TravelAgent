@@ -1,14 +1,12 @@
 from pathlib import Path
 from typing import Dict, Optional
 
-import yaml
-
 from settings import SKILL_CONFIG
-from core.skill_manifest import SkillManifest, load_skill_manifest
+from core.skill_definition import SkillDefinition, load_skill_definition, parse_skill_md
 
 
 class SkillLoader:
-    """Load SKILL.md metadata and prompt content from the configured skill root."""
+    """Discover standard SKILL.md packages and merge Hommey runtime extensions."""
 
     def __init__(self, skills_dir: Optional[str] = None):
         project_root = Path(__file__).parent.parent.resolve()
@@ -18,80 +16,64 @@ class SkillLoader:
             self.skills_dir = project_root / self.skills_dir
         self.skills_dir = self.skills_dir.resolve()
         self.skills: Dict[str, Dict] = {}
-        self.manifests: Dict[str, SkillManifest] = {}
+        self.definitions: Dict[str, SkillDefinition] = {}
 
     def load_skills(self) -> Dict[str, Dict]:
+        """Discover skills from standard ``SKILL.md`` frontmatter."""
         if not self.skills_dir.exists():
             print(f"Warning: Skills directory {self.skills_dir} not found.")
             return {}
 
-        self.skills = {}
-        for skill_path in sorted(self.skills_dir.iterdir()):
-            if not skill_path.is_dir():
-                continue
+        definitions = self.load_definitions()
 
-            md_file = skill_path / "SKILL.md"
-            if not md_file.exists():
-                continue
-
-            skill_info = self._parse_skill_md(md_file)
-            if skill_info:
-                skill_info.setdefault("directory", skill_path.name)
-                self.skills[skill_info.get("name", skill_path.name)] = skill_info
+        self.skills = {
+            definition.name: {
+                "name": definition.name,
+                "description": definition.description,
+                "directory": definition.name,
+            }
+            for definition in definitions.values()
+        }
 
         return self.skills
 
-    def load_manifests(self, strict: bool = True) -> Dict[str, SkillManifest]:
-        """Load and validate every runtime manifest under the configured root."""
+    def load_definitions(self, strict: bool = True) -> Dict[str, SkillDefinition]:
+        """Load every standard Skill and its optional ``hommey.yaml`` extension."""
         if not self.skills_dir.exists():
             return {}
 
-        manifests: Dict[str, SkillManifest] = {}
+        definitions: Dict[str, SkillDefinition] = {}
         errors = []
         for skill_path in sorted(self.skills_dir.iterdir()):
             if not skill_path.is_dir():
                 continue
-            manifest_path = skill_path / "manifest.yaml"
-            if not manifest_path.exists():
-                errors.append(f"Missing manifest.yaml: {skill_path.name}")
+            skill_md = skill_path / "SKILL.md"
+            if not skill_md.exists():
+                errors.append(f"Missing SKILL.md: {skill_path.name}")
                 continue
             try:
-                manifest = load_skill_manifest(manifest_path)
-                manifests[manifest.name] = manifest
+                definition = load_skill_definition(skill_path)
+                definitions[definition.name] = definition
             except Exception as exc:
                 errors.append(f"{skill_path.name}: {exc}")
 
         if errors and strict:
-            raise ValueError("Invalid skill manifests:\n- " + "\n- ".join(errors))
-        self.manifests = manifests
-        return manifests
+            raise ValueError("Invalid skills:\n- " + "\n- ".join(errors))
+        self.definitions = definitions
+        return definitions
 
-    def get_manifest(self, skill_name: str) -> Optional[SkillManifest]:
-        if not self.manifests:
-            self.load_manifests()
-        return self.manifests.get(skill_name)
+    def get_definition(self, skill_name: str) -> Optional[SkillDefinition]:
+        if not self.definitions:
+            self.load_definitions()
+        return self.definitions.get(skill_name)
 
-    def _parse_skill_md(self, file_path: Path) -> Optional[Dict]:
-        try:
-            content = file_path.read_text(encoding="utf-8")
-        except Exception as exc:
-            print(f"Error reading {file_path}: {exc}")
-            return None
+    def load_manifests(self, strict: bool = True) -> Dict[str, SkillDefinition]:
+        """Compatibility alias; use :meth:`load_definitions` in new code."""
+        return self.load_definitions(strict=strict)
 
-        if not content.startswith("---"):
-            return None
-
-        end_idx = content.find("---", 3)
-        if end_idx == -1:
-            return None
-
-        yaml_content = content[3:end_idx]
-        try:
-            data = yaml.safe_load(yaml_content)
-            return data if isinstance(data, dict) else None
-        except yaml.YAMLError as exc:
-            print(f"Error parsing YAML in {file_path}: {exc}")
-            return None
+    def get_manifest(self, skill_name: str) -> Optional[SkillDefinition]:
+        """Compatibility alias; use :meth:`get_definition` in new code."""
+        return self.get_definition(skill_name)
 
     def get_skill_prompt(self, skill_mapping: Optional[Dict[str, str]] = None) -> str:
         if not self.skills:
@@ -109,39 +91,29 @@ class SkillLoader:
         if not self.skills:
             self.load_skills()
 
-        target_path = self.skills_dir / skill_name / "SKILL.md"
-        if not target_path.exists():
-            target_path = self._find_skill_by_metadata_name(skill_name)
-
-        if not target_path:
+        definition = self.get_definition(skill_name)
+        if not definition:
             return None
+        target_path = self.skills_dir / definition.name / "SKILL.md"
 
         try:
-            content = target_path.read_text(encoding="utf-8")
+            _, body = parse_skill_md(target_path)
+            return body
         except Exception as exc:
             print(f"Error reading skill content {target_path}: {exc}")
             return None
 
-        if content.startswith("---"):
-            end_idx = content.find("---", 3)
-            if end_idx != -1:
-                content = content[end_idx + 3 :].strip()
-        return content
-
-    def _find_skill_by_metadata_name(self, skill_name: str) -> Optional[Path]:
-        if not self.skills_dir.exists():
+    def get_skill_resource(self, skill_name: str, relative_path: str) -> Optional[str]:
+        """Read a UTF-8 resource without allowing paths outside the Skill package."""
+        definition = self.get_definition(skill_name)
+        if not definition:
             return None
-
-        for skill_dir in sorted(self.skills_dir.iterdir()):
-            if not skill_dir.is_dir():
-                continue
-
-            md_path = skill_dir / "SKILL.md"
-            if not md_path.exists():
-                continue
-
-            info = self._parse_skill_md(md_path)
-            if info and info.get("name") == skill_name:
-                return md_path
-
-        return None
+        skill_root = (self.skills_dir / definition.name).resolve()
+        target_path = (skill_root / relative_path).resolve()
+        try:
+            target_path.relative_to(skill_root)
+        except ValueError:
+            raise ValueError(f"Skill resource escapes package root: {relative_path}")
+        if not target_path.is_file():
+            return None
+        return target_path.read_text(encoding="utf-8").strip()

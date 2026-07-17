@@ -14,6 +14,9 @@ class RecordingCursor:
     def execute(self, sql, params=None):
         self.calls.append((sql, params))
 
+    def fetchone(self):
+        return {"trip_id": "trip-test", "id": 1}
+
 
 class RecordingConnection:
     def __init__(self):

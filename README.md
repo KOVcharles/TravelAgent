@@ -127,15 +127,15 @@ http://127.0.0.1:8000
 每个运行时 Skill 位于 `.claude/skills/<skill-name>/`：
 
 ```text
-SKILL.md             精简的触发语义和工作流程
-manifest.yaml        版本、分类、工具权限、依赖和声明式执行计划
+SKILL.md             标准入口：name/description frontmatter + 工作流程
+hommey.yaml          可选平台扩展：版本、意图、工具、依赖和执行计划
 script/agent.py      AgentScope 执行器
 schemas/             输入输出契约（需要时）
 references/          按需加载的证据和流程规则（需要时）
 agents/openai.yaml   Skill UI 元数据（新 Skill 推荐）
 ```
 
-`manifest.yaml` 是意图目录、Agent 映射、执行顺序和管理页的单一数据源。管理员页面支持查看 Skill 详情、启用/停用、依赖图和脱敏执行轨迹。完整设计和升级说明见 [Skill 平台 v1 升级文档](docs/changelog/2026-07-11-skill-platform-v1.md)。
+Skill 发现遵循标准 `SKILL.md` frontmatter；`hommey.yaml` 只承载 Hommey 专属的 Agent 映射、执行顺序和治理配置。行程规划会先收集出发地、目的地、日期、时长和出差目的；信息完整后才并行查询制度、天气与公开交通信息。管理员页面支持查看 Skill 详情、启用/停用、依赖图和脱敏执行轨迹。完整设计见 [Skill 系统文档](docs/skill-system.md)。
 
 ## 鉴权流程
 
@@ -275,7 +275,7 @@ webui_new/
 
 agents/                  意图识别与多智能体编排
 .claude/skills/          声明式 Skill 包
-core/skill_manifest.py   Skill Manifest 强类型契约
+core/skill_definition.py 标准 Skill 元数据与 Hommey 扩展契约
 core/skill_store.py      Skill 启停和执行轨迹存储
 context/                 短期记忆和长期记忆
 rag/                     RAG 文档处理、向量检索
