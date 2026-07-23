@@ -105,8 +105,13 @@ SKILL_CONFIG = {
 
 RESILIENCE_CONFIG = {
     "max_retries": _int_env("HOMMEY_MAX_RETRIES", 3),
+    "agent_max_retries": _int_env("HOMMEY_AGENT_MAX_RETRIES", 1),
     "retry_base_delay_sec": _float_env("HOMMEY_RETRY_BASE_DELAY_SEC", 1.0),
     "retry_max_delay_sec": _float_env("HOMMEY_RETRY_MAX_DELAY_SEC", 30.0),
+    "max_agent_calls_per_request": _int_env("HOMMEY_MAX_AGENT_CALLS_PER_REQUEST", 8),
+    "max_external_calls_per_request": _int_env("HOMMEY_MAX_EXTERNAL_CALLS_PER_REQUEST", 16),
+    "max_external_calls_per_type": _int_env("HOMMEY_MAX_EXTERNAL_CALLS_PER_TYPE", 6),
+    "request_timeout_sec": _float_env("HOMMEY_REQUEST_TIMEOUT_SEC", 120.0),
     "circuit_failure_threshold": _int_env("HOMMEY_CIRCUIT_FAILURE_THRESHOLD", 5),
     "circuit_recovery_timeout_sec": _float_env(
         "HOMMEY_CIRCUIT_RECOVERY_TIMEOUT_SEC",

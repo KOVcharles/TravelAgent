@@ -28,6 +28,12 @@ from webui_new.core.errors import BusinessError, InternalError, UpstreamError
 from core.onboarding import InitialPreferenceOnboarding
 from core.intent_router import FastIntentRouter
 from core.intent_catalog import INTENT_DISPLAY_NAMES
+from core.execution_budget import (
+    ExecutionBudget,
+    ExecutionLimitExceeded,
+    consume_agent_call,
+    execution_budget_scope,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -224,6 +230,44 @@ class HommeyWebInstance:
         return None
 
     async def process_message(self, message: str, request_id: str | None = None) -> dict:
+        """Run one user request inside an isolated execution budget and deadline."""
+        rc = RESILIENCE_CONFIG
+        budget = ExecutionBudget(
+            max_agent_calls=rc.get("max_agent_calls_per_request", 8),
+            max_external_calls=rc.get("max_external_calls_per_request", 16),
+            max_external_calls_per_type=rc.get("max_external_calls_per_type", 6),
+        )
+        try:
+            with execution_budget_scope(budget):
+                return await asyncio.wait_for(
+                    self._process_message_impl(message, request_id=request_id),
+                    timeout=rc.get("request_timeout_sec", 120.0),
+                )
+        except ExecutionLimitExceeded as exc:
+            raise UpstreamError(
+                exc.code,
+                exc.public_message,
+                retryable=False,
+                component=COMPONENT_LLM,
+                debug_message=str(exc),
+            ) from exc
+        except asyncio.TimeoutError as exc:
+            logger.error(
+                "Request execution timed out user_id=%s budget=%s",
+                self.user_id,
+                budget.snapshot(),
+            )
+            raise UpstreamError(
+                "REQUEST_EXECUTION_TIMEOUT",
+                "本次任务处理超时，请稍后重试。",
+                retryable=True,
+                component=COMPONENT_LLM,
+                debug_message=str(exc),
+            ) from exc
+        finally:
+            logger.info("Request execution budget user_id=%s budget=%s", self.user_id, budget.snapshot())
+
+    async def _process_message_impl(self, message: str, request_id: str | None = None) -> dict:
         """处理用户消息，返回响应"""
         from agentscope.message import Msg
 
@@ -262,7 +306,7 @@ class HommeyWebInstance:
             return {"response": response, "agents": [], "preferences_updated": False}
 
         rc = RESILIENCE_CONFIG
-        max_retries = rc.get("max_retries", 3)
+        agent_max_retries = rc.get("agent_max_retries", 1)
         fast_route = self._route_without_context(message)
 
         if fast_route:
@@ -289,15 +333,21 @@ class HommeyWebInstance:
                 timings["context"] = time.perf_counter() - context_start
 
                 intent_start = time.perf_counter()
+                async def call_intention_agent():
+                    consume_agent_call("IntentionAgent")
+                    return await self.intention_agent.reply(context_messages)
+
                 intention_result = await retry_with_backoff(
-                    lambda: self.intention_agent.reply(context_messages),
-                    max_retries=max_retries,
+                    call_intention_agent,
+                    max_retries=agent_max_retries,
                     base_delay_sec=rc.get("retry_base_delay_sec", 1.0),
                     max_delay_sec=rc.get("retry_max_delay_sec", 30.0),
                 )
                 timings["intent"] = time.perf_counter() - intent_start
                 if self.circuit_breaker:
                     self.circuit_breaker.record_success()
+            except ExecutionLimitExceeded:
+                raise
             except CircuitOpenError:
                 record_upstream_error(COMPONENT_LLM, ERROR_CIRCUIT_OPEN, retryable=True)
                 raise UpstreamError("CIRCUIT_OPEN", "服务暂时不可用，请稍后再试。", retryable=True, component=COMPONENT_LLM)
@@ -330,15 +380,12 @@ class HommeyWebInstance:
         # 3. Orchestration
         try:
             orchestration_start = time.perf_counter()
-            orchestration_result = await retry_with_backoff(
-                lambda: self.orchestrator.reply(intention_result),
-                max_retries=max_retries,
-                base_delay_sec=rc.get("retry_base_delay_sec", 1.0),
-                max_delay_sec=rc.get("retry_max_delay_sec", 30.0),
-            )
+            orchestration_result = await self.orchestrator.reply(intention_result)
             timings["orchestration"] = time.perf_counter() - orchestration_start
             if self.circuit_breaker:
                 self.circuit_breaker.record_success()
+        except ExecutionLimitExceeded:
+            raise
         except CircuitOpenError:
             record_upstream_error(COMPONENT_LLM, ERROR_CIRCUIT_OPEN, retryable=True)
             raise UpstreamError("CIRCUIT_OPEN", "服务暂时不可用，请稍后再试。", retryable=True, component=COMPONENT_LLM)
@@ -406,24 +453,44 @@ class HommeyWebInstance:
 
     def _raise_on_agent_errors(self, result_data: dict) -> None:
         """Convert internal agent error payloads into the public AppError flow."""
+        overall_status = result_data.get("status")
+        if overall_status in {"completed", "partial_failure", "no_agents"}:
+            return
+
         errors = []
         for result in result_data.get("results", []):
             agent_name = result.get("agent_name", "unknown")
             status = result.get("status")
             data = result.get("data") if isinstance(result.get("data"), dict) else {}
-            message = result.get("message") or data.get("error") or data.get("message")
+            message = (
+                result.get("error_message")
+                or result.get("message")
+                or data.get("error")
+                or data.get("message")
+            )
 
             if status == "error":
-                errors.append((agent_name, message or "agent returned error status"))
+                errors.append({
+                    "agent_name": agent_name,
+                    "message": message or "agent returned error status",
+                    "error_code": result.get("error_code") or "AGENT_EXECUTION_FAILED",
+                })
                 continue
 
             if status == "success" and data.get("error") and not self._has_agent_success_payload(agent_name, data):
-                errors.append((agent_name, data.get("error")))
+                errors.append({
+                    "agent_name": agent_name,
+                    "message": data.get("error"),
+                    "error_code": "AGENT_EXECUTION_FAILED",
+                })
 
         if not errors:
             return
 
-        agent_name, debug_message = errors[0]
+        first_error = errors[0]
+        agent_name = first_error["agent_name"]
+        debug_message = first_error["message"]
+        error_code = first_error["error_code"]
         logger.error(
             "Agent result failed user_id=%s agent=%s error=%s",
             self.user_id,
@@ -431,10 +498,16 @@ class HommeyWebInstance:
             sanitize_for_log(debug_message),
         )
         record_upstream_error(COMPONENT_LLM, str(debug_message), retryable=True)
+        limit_codes = {
+            "AGENT_CALL_LIMIT_EXCEEDED",
+            "EXTERNAL_CALL_LIMIT_EXCEEDED",
+            "EXTERNAL_CALL_TYPE_LIMIT_EXCEEDED",
+        }
+        is_limit_error = error_code in limit_codes
         raise UpstreamError(
-            "AGENT_EXECUTION_FAILED",
-            "处理失败，请稍后重试。",
-            retryable=True,
+            error_code if is_limit_error else "AGENT_EXECUTION_FAILED",
+            str(debug_message) if is_limit_error else "处理失败，请稍后重试。",
+            retryable=not is_limit_error,
             component=COMPONENT_LLM,
             debug_message=f"{agent_name}: {debug_message}",
         )
@@ -602,6 +675,7 @@ class HommeyWebInstance:
             return "嗯嗯，我听着呢～有什么出行相关的问题需要帮忙吗？😊"
 
         try:
+            consume_agent_call(getattr(agent, "name", "chitchat"))
             input_msg = Msg(
                 name="user",
                 content=json.dumps({"query": user_input}, ensure_ascii=False),
@@ -611,6 +685,8 @@ class HommeyWebInstance:
             data = json.loads(response.content) if isinstance(response.content, str) else response.content
             reply = data.get("response", "") if isinstance(data, dict) else str(data)
             return reply
+        except ExecutionLimitExceeded:
+            raise
         except Exception as e:
             logger.warning(f"Chitchat failed: {e}")
             return "嗯嗯，我听着呢～有什么出行相关的问题需要帮忙吗？😊"
@@ -630,15 +706,18 @@ class HommeyWebInstance:
             agent_name = result.get("agent_name", "")
             status = result.get("status", "")
             data = result.get("data", {})
+            if status == "error" and result.get("on_failure") == "continue":
+                display = AGENT_DISPLAY_NAMES.get(agent_name, agent_name)
+                deferred_notes.append(f"⚠️ {display}暂时不可用，已基于其余成功结果降级处理。")
+                continue
             if planning_complete and agent_name in {"event_collection", "rag_knowledge", "information_query"}:
                 continue
             if planning_complete and agent_name == "trip_compliance" and data.get("verdict") == "unknown":
                 deferred_notes.append("📌 提醒：未检索到足以确认合规性的适用制度，请在提交前人工确认。")
                 continue
             if status == "error":
-                error_msg = data.get("error", "未知错误")
                 display = AGENT_DISPLAY_NAMES.get(agent_name, agent_name)
-                lines.append(f"❌ {display} 执行失败: {error_msg}")
+                lines.append(f"❌ {display}执行失败，请稍后重试。")
                 continue
             if status != "success":
                 continue

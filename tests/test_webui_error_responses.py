@@ -237,7 +237,7 @@ async def test_stream_error_event_contract(client, monkeypatch):
 
 
 @pytest.mark.anyio
-async def test_stream_agent_error_result_is_normalized(client, monkeypatch):
+async def test_stream_optional_agent_error_returns_partial_success(client, monkeypatch):
     class FastRoute:
         def to_intention_data(self, _message):
             return {
@@ -259,11 +259,17 @@ async def test_stream_agent_error_result_is_normalized(client, monkeypatch):
                         {
                             "status": "partial_failure",
                             "results": [
-                                {
-                                    "agent_name": "event_collection",
-                                    "status": "error",
-                                    "data": {"error": "Error in input stream"},
-                                }
+                                    {
+                                        "agent_name": "event_collection",
+                                        "status": "error",
+                                        "on_failure": "continue",
+                                        "data": {"error": "Error in input stream"},
+                                    },
+                                    {
+                                        "agent_name": "rag_knowledge",
+                                        "status": "success",
+                                        "data": {"answer": "住宿标准以公司制度为准"},
+                                    },
                             ],
                         }
                     )
@@ -285,11 +291,68 @@ async def test_stream_agent_error_result_is_normalized(client, monkeypatch):
 
     assert response.status_code == 200
     events = [json.loads(line) for line in response.text.splitlines()]
+    assert events[-1]["type"] == "done"
+    rendered = "".join(event.get("text", "") for event in events if event.get("type") == "chunk")
+    assert "住宿标准以公司制度为准" in rendered
+    assert "降级处理" in rendered
+    assert "Error in input stream" not in response.text
+
+
+@pytest.mark.anyio
+async def test_stream_required_agent_error_is_normalized(client, monkeypatch):
+    class FastRoute:
+        def to_intention_data(self, _message):
+            return {
+                "routing": {"should_call_skill": True},
+                "agent_schedule": [{"agent_name": "event_collection", "priority": 1}],
+            }
+
+    class Memory:
+        def add_message(self, *_args):
+            pass
+
+    class Orchestrator:
+        async def reply(self, _message):
+            return type(
+                "Result",
+                (),
+                {
+                    "content": json.dumps(
+                        {
+                            "status": "failed",
+                            "results": [
+                                {
+                                    "agent_name": "event_collection",
+                                    "status": "error",
+                                    "on_failure": "abort",
+                                    "error_message": "internal failure",
+                                    "data": {"error": "Error in input stream"},
+                                }
+                            ],
+                        }
+                    )
+                },
+            )()
+
+    instance = HommeyWebInstance("u1")
+    instance.initialized = True
+    instance.memory_manager = Memory()
+    instance.orchestrator = Orchestrator()
+    monkeypatch.setattr(instance, "_route_without_context", lambda _message: FastRoute())
+    monkeypatch.setattr(manager, "get", lambda _user_id: instance)
+
+    response = await client.post(
+        "/api/u1/chat/stream",
+        json={"message": "我要去出差"},
+        headers={"X-Request-ID": "rid-agent-stream-fatal"},
+    )
+
+    events = [json.loads(line) for line in response.text.splitlines()]
     assert events[-1] == {
         "type": "error",
         "code": "AGENT_EXECUTION_FAILED",
         "message": "处理失败，请稍后重试。",
-        "request_id": "rid-agent-stream",
+        "request_id": "rid-agent-stream-fatal",
         "retryable": True,
     }
     assert "Error in input stream" not in response.text
