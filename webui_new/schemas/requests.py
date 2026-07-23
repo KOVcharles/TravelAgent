@@ -15,6 +15,10 @@ class ChatRequest(BaseModel):
     message: str
 
 
+class SessionRenameRequest(BaseModel):
+    title: str
+
+
 class SkillToggleRequest(BaseModel):
     enabled: bool
 

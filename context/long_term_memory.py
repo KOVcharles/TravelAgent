@@ -42,6 +42,7 @@ class FileLongTermMemory:
             "user_id": self.user_id,
             "preferences": {},
             "chat_history": [],
+            "session_titles": {},
             "trip_history": [],
             "active_trip": None,
             "statistics": {
@@ -167,6 +168,33 @@ class FileLongTermMemory:
             rows = rows[-limit:]
         return [dict(row) for row in rows]
 
+    def get_chat_session_titles(self) -> Dict[str, str]:
+        return dict(self.data.setdefault("session_titles", {}))
+
+    def rename_chat_session(self, session_id: str, title: str) -> None:
+        clean_title = redact_sensitive_text(str(title or "").strip())[:80]
+        if not clean_title:
+            raise ValueError("Session title cannot be empty")
+        self.data.setdefault("session_titles", {})[session_id] = clean_title
+        self._save()
+
+    def delete_chat_session(self, session_id: str) -> None:
+        rows = self.data.setdefault("chat_history", [])
+        self.data["chat_history"] = [
+            row for row in rows if row.get("session_id") != session_id
+        ]
+        self.data.setdefault("session_titles", {}).pop(session_id, None)
+        self.data.setdefault("statistics", {})["total_messages"] = len(
+            self.data["chat_history"]
+        )
+        self._save()
+
+    def clear_chat_history(self) -> None:
+        self.data["chat_history"] = []
+        self.data["session_titles"] = {}
+        self.data.setdefault("statistics", {})["total_messages"] = 0
+        self._save()
+
     def save_trip_history(self, trip_info: Dict[str, Any]):
         trip_info = filter_safe_memory_mapping(trip_info)
         request_id = trip_info.get("request_id")
@@ -253,6 +281,7 @@ class FileLongTermMemory:
 
     def clear_history(self):
         self.data["chat_history"] = []
+        self.data["session_titles"] = {}
         self.data["trip_history"] = []
         stats = self.data.setdefault("statistics", {})
         stats["total_trips"] = 0
@@ -338,6 +367,17 @@ class PostgresLongTermMemory:
                     content TEXT NOT NULL,
                     request_id TEXT,
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                );
+                """
+            )
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS chat_session_titles (
+                    user_id TEXT NOT NULL,
+                    session_id TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    PRIMARY KEY (user_id, session_id)
                 );
                 """
             )
@@ -596,6 +636,68 @@ class PostgresLongTermMemory:
             for row in rows
         ]
 
+    def get_chat_session_titles(self) -> Dict[str, str]:
+        with self.conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT session_id, title
+                FROM chat_session_titles
+                WHERE user_id = %s;
+                """,
+                (self.user_id,),
+            )
+            rows = cur.fetchall()
+        return {row["session_id"]: row["title"] for row in rows}
+
+    def rename_chat_session(self, session_id: str, title: str) -> None:
+        clean_title = redact_sensitive_text(str(title or "").strip())[:80]
+        if not clean_title:
+            raise ValueError("Session title cannot be empty")
+        with self.conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO chat_session_titles (user_id, session_id, title, updated_at)
+                VALUES (%s, %s, %s, NOW())
+                ON CONFLICT (user_id, session_id)
+                DO UPDATE SET title = EXCLUDED.title, updated_at = NOW();
+                """,
+                (self.user_id, session_id, clean_title),
+            )
+
+    def delete_chat_session(self, session_id: str) -> None:
+        with self.conn.cursor() as cur:
+            cur.execute(
+                "DELETE FROM chat_history WHERE user_id = %s AND session_id = %s;",
+                (self.user_id, session_id),
+            )
+            cur.execute(
+                "DELETE FROM chat_session_titles WHERE user_id = %s AND session_id = %s;",
+                (self.user_id, session_id),
+            )
+            cur.execute(
+                """
+                UPDATE user_statistics
+                SET total_messages = (
+                    SELECT COUNT(*) FROM chat_history WHERE user_id = %s
+                ), updated_at = NOW()
+                WHERE user_id = %s;
+                """,
+                (self.user_id, self.user_id),
+            )
+
+    def clear_chat_history(self) -> None:
+        with self.conn.cursor() as cur:
+            cur.execute("DELETE FROM chat_history WHERE user_id = %s;", (self.user_id,))
+            cur.execute("DELETE FROM chat_session_titles WHERE user_id = %s;", (self.user_id,))
+            cur.execute(
+                """
+                UPDATE user_statistics
+                SET total_messages = 0, updated_at = NOW()
+                WHERE user_id = %s;
+                """,
+                (self.user_id,),
+            )
+
     def save_trip_history(self, trip_info: Dict[str, Any]):
         """
         保存行程历史
@@ -800,6 +902,7 @@ class PostgresLongTermMemory:
         """清空历史记录（保留偏好）"""
         with self.conn.cursor() as cur:
             cur.execute("DELETE FROM chat_history WHERE user_id = %s;", (self.user_id,))
+            cur.execute("DELETE FROM chat_session_titles WHERE user_id = %s;", (self.user_id,))
             cur.execute("DELETE FROM trip_history WHERE user_id = %s;", (self.user_id,))
             cur.execute(
                 """

@@ -15,6 +15,7 @@ from config_agentscope import init_agentscope
 from context.memory_manager import MemoryManager
 from utils.circuit_breaker import CircuitBreaker
 from core.skill_store import SkillPlatformStore
+from core.execution_budget import BudgetedModel
 
 
 @dataclass
@@ -39,16 +40,19 @@ def create_agent_runtime(
     from agentscope.model import OpenAIChatModel
 
     timeout_sec = SYSTEM_CONFIG.get("timeout", 60)
-    model = OpenAIChatModel(
+    raw_model = OpenAIChatModel(
         model_name=LLM_CONFIG["model_name"],
         api_key=LLM_CONFIG["api_key"],
         client_kwargs={
             "base_url": LLM_CONFIG["base_url"],
             "timeout": float(timeout_sec),
         },
-        temperature=LLM_CONFIG.get("temperature", 0.7),
-        max_tokens=LLM_CONFIG.get("max_tokens", 2000),
+        generate_kwargs={
+            "temperature": LLM_CONFIG.get("temperature", 0.7),
+            "max_tokens": LLM_CONFIG.get("max_tokens", 8192),
+        },
     )
+    model = BudgetedModel(raw_model)
 
     memory_manager = MemoryManager(
         user_id=user_id,
