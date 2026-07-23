@@ -130,6 +130,101 @@ class HommeyWebInstance:
             return True
         return self.onboarding.needs_onboarding(self.memory_manager)
 
+    def list_chat_sessions(self) -> list[dict]:
+        if not self.memory_manager:
+            return []
+        rows = self.memory_manager.long_term.get_chat_history(limit=None)
+        titles = self.memory_manager.long_term.get_chat_session_titles()
+        grouped: dict[str, list[dict]] = {}
+        for row in rows:
+            session_id = row.get("session_id")
+            if session_id:
+                grouped.setdefault(str(session_id), []).append(row)
+
+        sessions = []
+        for session_id, messages in grouped.items():
+            first_user = next(
+                (item.get("content", "") for item in messages if item.get("role") == "user"),
+                "",
+            )
+            last_message = messages[-1] if messages else {}
+            generated_title = " ".join(str(first_user).split())[:30] or "未命名会话"
+            sessions.append(
+                {
+                    "session_id": session_id,
+                    "title": titles.get(session_id) or generated_title,
+                    "preview": " ".join(str(last_message.get("content", "")).split())[:70],
+                    "updated_at": last_message.get("timestamp", ""),
+                    "message_count": len(messages),
+                    "active": session_id == self.session_id,
+                }
+            )
+        return sorted(
+            sessions,
+            key=lambda item: item.get("updated_at", ""),
+            reverse=True,
+        )
+
+    def get_chat_session(self, session_id: str) -> dict:
+        if not self.memory_manager:
+            return {"session_id": session_id, "messages": []}
+        rows = self.memory_manager.long_term.get_chat_history(
+            limit=None,
+            session_id=session_id,
+        )
+        titles = self.memory_manager.long_term.get_chat_session_titles()
+        return {
+            "session_id": session_id,
+            "title": titles.get(session_id),
+            "messages": rows,
+        }
+
+    def start_new_chat_session(self) -> str:
+        session_id = str(uuid.uuid4())[:8]
+        self.session_id = session_id
+        if self.memory_manager:
+            self.memory_manager.rotate_session(session_id)
+        self._last_activity_monotonic = None
+        self._total_messages = 0
+        return session_id
+
+    def activate_chat_session(self, session_id: str) -> dict:
+        payload = self.get_chat_session(session_id)
+        if not payload["messages"]:
+            raise ValueError("Chat session not found")
+        self.session_id = session_id
+        if self.memory_manager:
+            self.memory_manager.rotate_session(session_id)
+            for message in payload["messages"][-10:]:
+                role = message.get("role")
+                content = message.get("content")
+                if role in {"user", "assistant"} and content:
+                    self.memory_manager.short_term.add_message(role, content)
+        self._last_activity_monotonic = time.monotonic()
+        self._total_messages = len(payload["messages"])
+        return payload
+
+    def rename_chat_session(self, session_id: str, title: str) -> None:
+        if not self.memory_manager:
+            raise ValueError("Memory is not initialized")
+        if not self.get_chat_session(session_id)["messages"]:
+            raise ValueError("Chat session not found")
+        self.memory_manager.long_term.rename_chat_session(session_id, title)
+
+    def delete_chat_session(self, session_id: str) -> str:
+        if not self.memory_manager:
+            raise ValueError("Memory is not initialized")
+        self.memory_manager.long_term.delete_chat_session(session_id)
+        if session_id == self.session_id:
+            return self.start_new_chat_session()
+        return self.session_id
+
+    def clear_chat_history(self) -> str:
+        if not self.memory_manager:
+            raise ValueError("Memory is not initialized")
+        self.memory_manager.long_term.clear_chat_history()
+        return self.start_new_chat_session()
+
     async def get_onboarding_state(self) -> dict:
         """Return first-run preference setup progress."""
         if not self.memory_manager:

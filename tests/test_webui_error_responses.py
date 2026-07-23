@@ -68,6 +68,10 @@ def test_webui_routes_are_registered():
     assert "/api/{user_id}/onboarding/preference" in paths
     assert "/api/{user_id}/chat" in paths
     assert "/api/{user_id}/chat/stream" in paths
+    assert "/api/{user_id}/sessions" in paths
+    assert "/api/{user_id}/sessions/{session_id}" in paths
+    assert "/api/{user_id}/sessions/{session_id}/activate" in paths
+    assert "/api/{user_id}/history" in paths
     assert "/api/{user_id}/trip/active" in paths
     assert "/admin/skills" in paths
     assert "/api/admin/skills" in paths
@@ -157,6 +161,81 @@ async def test_empty_message_error_contract(client, monkeypatch):
     assert _error(response.json())["code"] == "EMPTY_MESSAGE"
     assert _error(response.json())["message"] == "请输入消息"
     assert _error(response.json())["request_id"] == "rid-empty"
+
+
+@pytest.mark.anyio
+async def test_session_history_endpoints_contract(client, monkeypatch):
+    calls = []
+
+    class FakeInstance:
+        initialized = True
+        session_id = "s1"
+
+        def list_chat_sessions(self):
+            return [{"session_id": "s1", "title": "上海安排"}]
+
+        def start_new_chat_session(self):
+            calls.append(("new",))
+            return "s2"
+
+        def activate_chat_session(self, session_id):
+            calls.append(("activate", session_id))
+            return {
+                "session_id": session_id,
+                "messages": [{"role": "user", "content": "上海出差"}],
+            }
+
+        def rename_chat_session(self, session_id, title):
+            calls.append(("rename", session_id, title))
+
+        def delete_chat_session(self, session_id):
+            calls.append(("delete", session_id))
+            return "s2"
+
+        def clear_chat_history(self):
+            calls.append(("clear",))
+            return "s3"
+
+    monkeypatch.setattr(manager, "get", lambda _user_id: FakeInstance())
+
+    listed = await client.get("/api/u1/sessions")
+    created = await client.post("/api/u1/sessions")
+    activated = await client.post("/api/u1/sessions/s1/activate")
+    renamed = await client.patch("/api/u1/sessions/s1", json={"title": " 新名字 "})
+    deleted = await client.delete("/api/u1/sessions/s1")
+    cleared = await client.delete("/api/u1/history")
+
+    assert listed.json()["sessions"][0]["title"] == "上海安排"
+    assert created.json() == {"session_id": "s2"}
+    assert activated.json()["messages"][0]["content"] == "上海出差"
+    assert renamed.json() == {"session_id": "s1", "title": "新名字"}
+    assert deleted.json() == {"active_session_id": "s2"}
+    assert cleared.json() == {"active_session_id": "s3"}
+    assert calls == [
+        ("new",),
+        ("activate", "s1"),
+        ("rename", "s1", "新名字"),
+        ("delete", "s1"),
+        ("clear",),
+    ]
+
+
+@pytest.mark.anyio
+async def test_empty_session_title_error_contract(client, monkeypatch):
+    class FakeInstance:
+        initialized = True
+
+    monkeypatch.setattr(manager, "get", lambda _user_id: FakeInstance())
+
+    response = await client.patch(
+        "/api/u1/sessions/s1",
+        json={"title": "   "},
+        headers={"X-Request-ID": "rid-session-title"},
+    )
+
+    assert response.status_code == 400
+    assert _error(response.json())["code"] == "EMPTY_SESSION_TITLE"
+    assert _error(response.json())["request_id"] == "rid-session-title"
 
 
 @pytest.mark.anyio
